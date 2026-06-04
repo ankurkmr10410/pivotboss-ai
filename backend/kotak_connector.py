@@ -43,9 +43,11 @@ class KotakConnector:
     def __init__(self):
         self.consumer_key    = os.getenv("KOTAK_CONSUMER_KEY", "")
         self.consumer_secret = os.getenv("KOTAK_CONSUMER_SECRET", "")
+        self.neo_fin_key     = os.getenv("KOTAK_NEOFINK", "")
         self.mobile_number   = os.getenv("KOTAK_MOBILE", "")
         self.password        = os.getenv("KOTAK_PASSWORD", "")
         self.mpin            = os.getenv("KOTAK_MPIN", "")
+        self.environment     = os.getenv("KOTAK_ENVIRONMENT", "prod")
 
         self.client = None
         self.is_logged_in = False
