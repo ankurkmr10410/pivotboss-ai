@@ -19,12 +19,33 @@ from cpr_engine    import calculate_cpr, generate_signal, run_analysis
 from paper_trader  import PaperTrader, TradeStatus
 from kotak_connector import get_connector
 
+# Ensure logging directory exists
+Path("logs").mkdir(exist_ok=True)
+
+# Try to ensure console uses UTF-8 so emoji/logging don't raise on Windows
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+try:
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+import io
+
+# Wrap console stream to ensure UTF-8 output (replace unencodable chars)
+try:
+    console_stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+except Exception:
+    console_stream = sys.stdout
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("logs/trading_bot.log"),
+        logging.StreamHandler(console_stream),
+        logging.FileHandler("logs/trading_bot.log", encoding="utf-8"),
     ]
 )
 logger = logging.getLogger(__name__)
