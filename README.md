@@ -70,7 +70,14 @@ cp config/.env.example config/.env
 1. Open **Kotak Neo app** or web → **Invest tab** → **Trade API card**
 2. Click **Generate Application**
 3. Copy your **Consumer Key** and **Consumer Secret**
-4. Put them in `config/.env`
+4. Register TOTP for Trade API access and note your UCC from the Kotak Neo profile
+5. Put the Consumer Key, registered mobile number, UCC, and 6-digit Neo MPIN in `config/.env`
+
+To test only the Kotak login flow before running the bot:
+
+```bash
+python scripts/kotak_login.py
+```
 
 ### 4. Run the Bot
 

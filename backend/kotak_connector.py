@@ -45,6 +45,7 @@ class KotakConnector:
         self.consumer_secret = os.getenv("KOTAK_CONSUMER_SECRET", "")
         self.neo_fin_key     = os.getenv("KOTAK_NEOFINK", "")
         self.mobile_number   = os.getenv("KOTAK_MOBILE", "")
+        self.ucc             = os.getenv("KOTAK_UCC", "")
         self.password        = os.getenv("KOTAK_PASSWORD", "")
         self.mpin            = os.getenv("KOTAK_MPIN", "")
         self.environment     = os.getenv("KOTAK_ENVIRONMENT", "prod")
@@ -55,6 +56,19 @@ class KotakConnector:
 
     # ── AUTH ────────────────────────────────────────────────────────────────
 
+    def _init_client(self):
+        """Create the Kotak Neo SDK client using the v2 constructor."""
+        from neo_api_client import NeoAPI
+
+        if self.client is None:
+            self.client = NeoAPI(
+                environment=self.environment,
+                access_token=None,
+                neo_fin_key=self.neo_fin_key or None,
+                consumer_key=self.consumer_key,
+            )
+        return self.client
+
     def login(self) -> bool:
         """
         Kotak Neo Login flow (3 steps):
@@ -63,13 +77,7 @@ class KotakConnector:
         3. Done            → client ready for trading
         """
         try:
-            from neo_api_client import NeoAPI
-
-            self.client = NeoAPI(
-                consumer_key=self.consumer_key,
-                consumer_secret=self.consumer_secret,
-                environment="prod",   # use 'uat' for testing
-            )
+            self._init_client()
 
             # Step 1: Initiate login — triggers OTP to your mobile
             resp = self.client.login(
@@ -103,6 +111,87 @@ class KotakConnector:
             logger.error(f"OTP error: {e}")
             return False
 
+    def totp_login(self, ucc: Optional[str] = None, totp: Optional[str] = None) -> bool:
+        """Step 1 of Kotak Neo v2 TOTP flow: create the view token."""
+        try:
+            self._init_client()
+            ucc = (ucc or self.ucc).strip()
+            totp = (totp or "").strip()
+
+            missing = []
+            if not self.consumer_key:
+                missing.append("KOTAK_CONSUMER_KEY")
+            if not self.mobile_number:
+                missing.append("KOTAK_MOBILE")
+            if not ucc:
+                missing.append("KOTAK_UCC")
+            if not totp:
+                missing.append("TOTP")
+            if missing:
+                logger.error("Missing Kotak TOTP login value(s): %s", ", ".join(missing))
+                return False
+
+            resp = self.client.totp_login(
+                mobile_number=self.mobile_number,
+                ucc=ucc,
+                totp=totp,
+            )
+            if self._response_has_error(resp):
+                logger.error("TOTP login failed: %s", self._safe_response(resp))
+                return False
+
+            logger.info("Kotak Neo TOTP login accepted. Validate MPIN next.")
+            return True
+        except Exception as e:
+            logger.error(f"TOTP login error: {e}")
+            return False
+
+    def totp_validate(self, mpin: Optional[str] = None) -> bool:
+        """Step 2 of Kotak Neo v2 TOTP flow: validate MPIN and create trade token."""
+        try:
+            self._init_client()
+            mpin = (mpin or self.mpin).strip()
+            if not mpin:
+                logger.error("Missing KOTAK_MPIN")
+                return False
+            if not (mpin.isdigit() and len(mpin) == 6):
+                logger.error("KOTAK_MPIN must be exactly 6 digits.")
+                return False
+
+            resp = self.client.totp_validate(mpin=mpin)
+            if self._response_has_error(resp):
+                logger.error("MPIN validation failed: %s", self._safe_response(resp))
+                return False
+
+            self.is_logged_in = True
+            logger.info("Kotak Neo TOTP login successful.")
+            return True
+        except Exception as e:
+            logger.error(f"MPIN validation error: {e}")
+            return False
+
+    @staticmethod
+    def _response_has_error(resp) -> bool:
+        if not resp:
+            return True
+        if isinstance(resp, dict):
+            if resp.get("error") or resp.get("Error") or resp.get("Error Message"):
+                return True
+            return not resp.get("data")
+        return False
+
+    @staticmethod
+    def _safe_response(resp):
+        if not isinstance(resp, dict):
+            return resp
+        safe = json.loads(json.dumps(resp, default=str))
+        data = safe.get("data")
+        if isinstance(data, dict):
+            for key in ("token", "sid", "rid", "searchAPIKey"):
+                if data.get(key):
+                    data[key] = "***"
+        return safe
+
     # ── MARKET DATA ─────────────────────────────────────────────────────────
 
     def get_quotes(self, symbol: str) -> Optional[dict]:
@@ -117,11 +206,13 @@ class KotakConnector:
                 logger.error(f"Symbol {symbol} not in SYMBOL_TOKENS map.")
                 return None
 
+            instrument_tokens = [{
+                "instrument_token": info["token"],
+                "exchange_segment": info["exchange"],
+            }]
             resp = self.client.quotes(
-                instrument_token=info["token"],
+                instrument_tokens=instrument_tokens,
                 quote_type="ltp",          # ltp = last traded price
-                isIndex=symbol in ["NIFTY", "BANKNIFTY"],
-                exchange=info["exchange"],
             )
 
             if resp and resp.get("data"):
