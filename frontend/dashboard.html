@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PivotBoss AI — CPR Trading System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #070c14;
+    --surface: #0d1520;
+    --surface2: #111d2e;
+    --border: rgba(99,179,255,0.1);
+    --border2: rgba(99,179,255,0.2);
+    --text: #e2eaf5;
+    --muted: #6b7f99;
+    --accent: #3b8fff;
+    --accent2: #00d4aa;
+    --bull: #00d4aa;
+    --bear: #ff5757;
+    --warn: #ffb830;
+    --neutral: #6b7f99;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid scanline effect */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(99,179,255,0.02) 40px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; }
+
+  /* ── HEADER ─────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(7,12,20,0.9);
+    backdrop-filter: blur(10px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .logo-text {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.5px;
+  }
+
+  .logo-sub {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .market-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0,212,170,0.08);
+    border: 1px solid rgba(0,212,170,0.2);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent2);
+  }
+
+  .pulse {
+    width: 6px;
+    height: 6px;
+    background: var(--accent2);
+    border-radius: 50%;
+    animation: pulse 2s ease infinite;
+  }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  .mode-badge {
+    background: rgba(255,184,48,0.1);
+    border: 1px solid rgba(255,184,48,0.3);
+    color: var(--warn);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  /* ── LAYOUT ─────────────────────────────────── */
+  .main {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 65px);
+  }
+
+  /* ── SIDEBAR ─────────────────────────────────── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    background: var(--surface);
+  }
+
+  .sidebar-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    padding-left: 4px;
+  }
+
+  .symbol-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .symbol-card:hover, .symbol-card.active {
+    border-color: var(--accent);
+    background: rgba(59,143,255,0.06);
+  }
+
+  .symbol-card.active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+    border-radius: 3px 0 0 3px;
+  }
+
+  .sym-name {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .sym-price {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+
+  .sym-change {
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .signal-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-top: 6px;
+  }
+
+  .pill-STRONG_BUY { background: rgba(0,212,170,0.15); color: var(--bull); border: 1px solid rgba(0,212,170,0.3); }
+  .pill-BUY { background: rgba(0,212,170,0.08); color: #5de8c4; border: 1px solid rgba(0,212,170,0.2); }
+  .pill-NEUTRAL { background: rgba(107,127,153,0.15); color: var(--neutral); border: 1px solid rgba(107,127,153,0.3); }
+  .pill-SELL { background: rgba(255,87,87,0.08); color: #ff8080; border: 1px solid rgba(255,87,87,0.2); }
+  .pill-STRONG_SELL { background: rgba(255,87,87,0.15); color: var(--bear); border: 1px solid rgba(255,87,87,0.3); }
+
+  .add-symbol-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px dashed var(--border2);
+    border-radius: 10px;
+    padding: 12px;
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 8px;
+  }
+
+  .add-symbol-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ── MAIN CONTENT ─────────────────────────────── */
+  .content {
+    padding: 24px 28px;
+    overflow-y: auto;
+  }
+
+  /* ── STATS ROW ─────────────────────────────── */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .green { color: var(--bull); }
+  .red { color: var(--bear); }
+  .blue { color: var(--accent); }
+  .yellow { color: var(--warn); }
+
+  /* ── CPR ANALYSIS PANEL ─────────────────────── */
+  .panel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* ── CPR LEVEL VISUALIZER ─────────────────────── */
+  .cpr-viz {
+    position: relative;
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .level-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .level-name {
+    width: 40px;
+    text-align: right;
+    color: var(--muted);
+  }
+
+  .level-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+    position: relative;
+  }
+
+  .level-value {
+    width: 80px;
+    text-align: right;
+  }
+
+  .cpr-zone {
+    background: rgba(59,143,255,0.08);
+    border-top: 1px solid rgba(59,143,255,0.4);
+    border-bottom: 1px solid rgba(59,143,255,0.4);
+    padding: 8px 0;
+    margin: 4px 0;
+  }
+
+  .price-marker {
+    background: rgba(255,184,48,0.12);
+    border: 1px solid rgba(255,184,48,0.4);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--warn);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── SIGNAL CARD ─────────────────────────────── */
+  .signal-card {
+    background: var(--surface2);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .signal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .big-signal {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .strength-bar-wrap {
+    margin-bottom: 12px;
+  }
+
+  .strength-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    margin-bottom: 4px;
+  }
+
+  .strength-track {
+    height: 6px;
+    background: var(--surface);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .strength-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.8s ease;
+  }
+
+  .trade-levels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .trade-level {
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+  }
+
+  .tl-label {
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+
+  .tl-value {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  /* ── REASONS LIST ─────────────────────────────── */
+  .reasons {
+    margin-top: 12px;
+  }
+
+  .reason-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.4;
+  }
+
+  .reason-item:last-child { border-bottom: none; }
+
+  .reason-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-top: 5px;
+  }
+
+  /* ── TRADE TABLE ─────────────────────────────── */
+  .trade-table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .table-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--muted);
+    text-align: left;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }
+
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(99,179,255,0.05);
+    font-family: var(--mono);
+    font-size: 12px;
+    vertical-align: middle;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(59,143,255,0.03); }
+
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--mono);
+  }
+
+  .status-OPEN { background: rgba(59,143,255,0.15); color: var(--accent); }
+  .status-win { background: rgba(0,212,170,0.12); color: var(--bull); }
+  .status-loss { background: rgba(255,87,87,0.12); color: var(--bear); }
+
+  /* ── INPUT PANEL ─────────────────────────────── */
+  .input-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .form-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--muted);
+  }
+
+  .form-input {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+
+  .form-input:focus { border-color: var(--accent); }
+
+  .analyze-btn {
+    background: linear-gradient(135deg, var(--accent), #1a6fd4);
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+    letter-spacing: 0.5px;
+  }
+
+  .analyze-btn:hover { opacity: 0.85; }
+
+  /* ── CPR TYPE BADGE ─────────────────────────────── */
+  .cpr-type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 5px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .cpr-NARROW { background: rgba(0,212,170,0.1); color: var(--bull); border: 1px solid rgba(0,212,170,0.3); }
+  .cpr-WIDE   { background: rgba(255,87,87,0.1); color: var(--bear); border: 1px solid rgba(255,87,87,0.3); }
+  .cpr-NORMAL { background: rgba(59,143,255,0.1); color: var(--accent); border: 1px solid rgba(59,143,255,0.3); }
+
+  .virgin-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    background: rgba(255,184,48,0.12);
+    color: var(--warn);
+    border: 1px solid rgba(255,184,48,0.3);
+  }
+
+  .rr-badge {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--warn);
+  }
+
+  /* ── SCROLLBAR ─────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  /* ── ANIMATIONS ─────────────────────────────── */
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .fade-in { animation: fadeIn 0.3s ease forwards; }
+
+  .section-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .tag-narrow { background: rgba(0,212,170,0.1); color: var(--bull); padding: 1px 6px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
+  .tag-wide   { background: rgba(255,87,87,0.1); color: var(--bear); padding: 1px 6px; border-radius: 3px; font-size: 10px; font-family: var(--mono); }
+
+  .paper-tag {
+    background: rgba(255,184,48,0.1);
+    border: 1px solid rgba(255,184,48,0.25);
+    color: var(--warn);
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">PB</div>
+      <div>
+        <div class="logo-text">PivotBoss AI</div>
+        <div class="logo-sub">CPR-Based Trading System</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="market-badge">
+        <div class="pulse"></div>
+        <span id="clock">--:--:--</span>
+      </div>
+      <div class="mode-badge">PAPER TRADING</div>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="sidebar-label">WATCHLIST</div>
+
+      <div class="symbol-card active" onclick="selectSymbol('NIFTY')">
+        <div class="sym-name">NIFTY 50</div>
+        <div class="sym-price green" id="price-NIFTY">₹24,780</div>
+        <div class="sym-change green" id="change-NIFTY">+0.33%</div>
+        <div class="signal-pill pill-BUY" id="sig-NIFTY">▲ BUY</div>
+      </div>
+
+      <div class="symbol-card" onclick="selectSymbol('BANKNIFTY')">
+        <div class="sym-name">BANK NIFTY</div>
+        <div class="sym-price" id="price-BANKNIFTY">₹51,950</div>
+        <div class="sym-change" id="change-BANKNIFTY">—</div>
+        <div class="signal-pill pill-NEUTRAL" id="sig-BANKNIFTY">◆ NEUTRAL</div>
+      </div>
+
+      <div class="symbol-card" onclick="selectSymbol('RELIANCE')">
+        <div class="sym-name">RELIANCE</div>
+        <div class="sym-price green" id="price-RELIANCE">₹2,968</div>
+        <div class="sym-change green" id="change-RELIANCE">+0.42%</div>
+        <div class="signal-pill pill-BUY" id="sig-RELIANCE">▲ BUY</div>
+      </div>
+
+      <button class="add-symbol-btn" onclick="showAddSymbol()">+ Add Symbol</button>
+
+      <div style="margin-top: 24px;">
+        <div class="sidebar-label">PORTFOLIO</div>
+        <div style="background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 14px;">
+          <div style="font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 6px;">Capital</div>
+          <div style="font-family: var(--mono); font-size: 20px; font-weight: 700;" id="capital-display">₹5,00,000</div>
+          <div style="font-family: var(--mono); font-size: 12px; margin-top: 4px;" id="capital-change" class="green">+0.00%</div>
+          <div style="margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <div style="font-size: 10px; color: var(--muted); font-family: var(--mono);">WIN RATE</div>
+              <div style="font-family: var(--mono); font-size: 15px; font-weight: 700;" id="win-rate-display">0%</div>
+            </div>
+            <div>
+              <div style="font-size: 10px; color: var(--muted); font-family: var(--mono);">TRADES</div>
+              <div style="font-family: var(--mono); font-size: 15px; font-weight: 700;" id="trades-display">0</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CPR Book Key Rules -->
+      <div style="margin-top: 20px;">
+        <div class="sidebar-label">PIVOT BOSS RULES</div>
+        <div style="font-size: 11px; color: var(--muted); line-height: 1.7; padding: 0 2px;">
+          <div style="margin-bottom: 5px;">↑ Open above TC = Bullish day</div>
+          <div style="margin-bottom: 5px;">↓ Open below BC = Bearish day</div>
+          <div style="margin-bottom: 5px;">◆ Narrow CPR = Trending day</div>
+          <div style="margin-bottom: 5px;">▬ Wide CPR = Sideways day</div>
+          <div style="margin-bottom: 5px;">★ Virgin CPR = Strong magnet</div>
+          <div>⚡ Price in CPR = Wait</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="content">
+
+      <!-- MANUAL ANALYSIS INPUT -->
+      <div class="input-panel">
+        <div class="section-title">CALCULATE CPR — ENTER OHLC DATA</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">SYMBOL</label>
+            <input class="form-input" id="inp-symbol" value="NIFTY" placeholder="NIFTY">
+          </div>
+          <div class="form-group">
+            <label class="form-label">PREV HIGH</label>
+            <input class="form-input" id="inp-high" type="number" value="24850" placeholder="24850">
+          </div>
+          <div class="form-group">
+            <label class="form-label">PREV LOW</label>
+            <input class="form-input" id="inp-low" type="number" value="24450" placeholder="24450">
+          </div>
+          <div class="form-group">
+            <label class="form-label">PREV CLOSE</label>
+            <input class="form-input" id="inp-close" type="number" value="24700" placeholder="24700">
+          </div>
+          <button class="analyze-btn" onclick="calculateCPR()">CALCULATE →</button>
+        </div>
+        <div style="display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap;">
+          <div class="form-group" style="flex: 1; min-width: 140px;">
+            <label class="form-label">CURRENT PRICE</label>
+            <input class="form-input" id="inp-current" type="number" value="24780" placeholder="24780">
+          </div>
+          <div class="form-group" style="flex: 1; min-width: 140px;">
+            <label class="form-label">OPENING PRICE</label>
+            <input class="form-input" id="inp-open" type="number" value="24720" placeholder="24720">
+          </div>
+          <div class="form-group" style="flex: 1; min-width: 140px;">
+            <label class="form-label">PREV CPR HIGH (optional)</label>
+            <input class="form-input" id="inp-pcprhigh" type="number" value="24750" placeholder="for virgin check">
+          </div>
+          <div class="form-group" style="flex: 1; min-width: 140px;">
+            <label class="form-label">PREV CPR LOW (optional)</label>
+            <input class="form-input" id="inp-pcprlow" type="number" value="24650" placeholder="for virgin check">
+          </div>
+        </div>
+      </div>
+
+      <!-- STATS ROW -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">TOTAL P&L</div>
+          <div class="stat-value green" id="stat-pnl">₹0</div>
+          <div class="stat-sub" id="stat-pnl-pct">0.00% from ₹5L</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">WIN RATE</div>
+          <div class="stat-value blue" id="stat-winrate">0%</div>
+          <div class="stat-sub" id="stat-trades">0 closed trades</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">PROFIT FACTOR</div>
+          <div class="stat-value" id="stat-pf">—</div>
+          <div class="stat-sub">gross win / loss</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">BEST TRADE</div>
+          <div class="stat-value green" id="stat-best">₹0</div>
+          <div class="stat-sub">single trade max</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">MAX DRAWDOWN</div>
+          <div class="stat-value red" id="stat-dd">0%</div>
+          <div class="stat-sub">from peak capital</div>
+        </div>
+      </div>
+
+      <!-- CPR ANALYSIS + SIGNAL PANEL -->
+      <div class="panel-grid" id="analysis-section">
+        <!-- CPR Levels Panel -->
+        <div class="panel">
+          <div class="panel-title">
+            <span>CPR LEVELS</span>
+            <div style="display: flex; gap: 6px;" id="cpr-badges">
+              <span class="cpr-type-badge cpr-WIDE" id="cpr-type-badge">WIDE CPR</span>
+            </div>
+          </div>
+
+          <div id="cpr-levels-display">
+            <div style="font-size: 12px; color: var(--muted); font-family: var(--mono);">Enter OHLC data and click CALCULATE to see CPR levels</div>
+          </div>
+        </div>
+
+        <!-- Signal Panel -->
+        <div class="panel">
+          <div class="panel-title">
+            <span>AI SIGNAL</span>
+            <span class="rr-badge" id="rr-display">R:R 1:—</span>
+          </div>
+
+          <div class="signal-card" id="signal-display-card">
+            <div class="signal-header">
+              <div>
+                <div style="font-size: 10px; color: var(--muted); font-family: var(--mono); margin-bottom: 4px;">SIGNAL</div>
+                <div class="big-signal green" id="sig-main">WAITING...</div>
+              </div>
+              <div id="virgin-badge-wrap"></div>
+            </div>
+
+            <div class="strength-bar-wrap">
+              <div class="strength-label">
+                <span>STRENGTH</span>
+                <span id="strength-val">—/10</span>
+              </div>
+              <div class="strength-track">
+                <div class="strength-fill" id="strength-bar" style="width: 0%; background: var(--accent);"></div>
+              </div>
+            </div>
+
+            <div class="trade-levels" id="trade-levels">
+              <div class="trade-level">
+                <div class="tl-label">ENTRY</div>
+                <div class="tl-value blue" id="lvl-entry">—</div>
+              </div>
+              <div class="trade-level">
+                <div class="tl-label">STOP LOSS</div>
+                <div class="tl-value red" id="lvl-sl">—</div>
+              </div>
+              <div class="trade-level">
+                <div class="tl-label">TARGET 1</div>
+                <div class="tl-value green" id="lvl-t1">—</div>
+              </div>
+              <div class="trade-level">
+                <div class="tl-label">TARGET 2</div>
+                <div class="tl-value green" id="lvl-t2">—</div>
+              </div>
+              <div class="trade-level">
+                <div class="tl-label">TARGET 3</div>
+                <div class="tl-value green" id="lvl-t3">—</div>
+              </div>
+              <div class="trade-level">
+                <div class="tl-label">CPR WIDTH</div>
+                <div class="tl-value yellow" id="lvl-width">—</div>
+              </div>
+            </div>
+
+            <div class="reasons" id="reasons-list">
+              <div class="reason-item"><div class="reason-dot"></div><span>Calculate CPR to see AI analysis</span></div>
+            </div>
+
+            <button class="analyze-btn" style="width: 100%; margin-top: 14px;" id="paper-trade-btn" onclick="executePaperTrade()" disabled>
+              EXECUTE PAPER TRADE
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRADE JOURNAL -->
+      <div class="trade-table-wrap">
+        <div class="table-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="section-title" style="margin: 0;">TRADE JOURNAL</span>
+            <span class="paper-tag">PAPER</span>
+          </div>
+          <button onclick="resetTrades()" style="background: transparent; border: 1px solid var(--border2); border-radius: 5px; padding: 4px 10px; color: var(--muted); font-family: var(--mono); font-size: 10px; cursor: pointer;">RESET</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>SYMBOL</th>
+              <th>DIR</th>
+              <th>DATE</th>
+              <th>ENTRY</th>
+              <th>SL</th>
+              <th>T1</th>
+              <th>QTY</th>
+              <th>STATUS</th>
+              <th>P&L</th>
+            </tr>
+          </thead>
+          <tbody id="trade-tbody">
+            <tr>
+              <td colspan="10" style="text-align: center; color: var(--muted); padding: 24px; font-family: var(--mono); font-size: 12px;">
+                No paper trades yet. Calculate CPR → get signal → execute paper trade.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CPR CALCULATION ENGINE (JS port of Python engine) ──────────────────────
+
+function calculateCPRLevels(high, low, close, prevCPRHigh, prevCPRLow, prevHigh, prevLow) {
+  const pivot = (high + low + close) / 3;
+  let tc = (pivot + high) / 2;
+  let bc = (pivot + low) / 2;
+  if (bc > tc) { let tmp = tc; tc = bc; bc = tmp; }
+
+  const cprWidth = tc - bc;
+  const cprWidthPct = (cprWidth / pivot) * 100;
+
+  const r1 = (2 * pivot) - low;
+  const r2 = pivot + (high - low);
+  const r3 = high + 2 * (pivot - low);
+  const s1 = (2 * pivot) - high;
+  const s2 = pivot - (high - low);
+  const s3 = low - 2 * (high - pivot);
+
+  const range = high - low;
+  const camR1 = close + range * 1.1 / 12;
+  const camR2 = close + range * 1.1 / 6;
+  const camS1 = close - range * 1.1 / 12;
+  const camS2 = close - range * 1.1 / 6;
+
+  let cprType = cprWidthPct < 0.3 ? 'NARROW' : cprWidthPct > 0.8 ? 'WIDE' : 'NORMAL';
+
+  let isVirgin = false;
+  if (prevCPRHigh && prevCPRLow && prevHigh && prevLow) {
+    const entered = (prevLow <= prevCPRHigh) && (prevHigh >= prevCPRLow);
+    isVirgin = !entered;
+  }
+
+  return {
+    pivot: r(pivot), tc: r(tc), bc: r(bc),
+    cprWidth: r(cprWidth), cprWidthPct: r(cprWidthPct, 3),
+    r1: r(r1), r2: r(r2), r3: r(r3),
+    s1: r(s1), s2: r(s2), s3: r(s3),
+    camR1: r(camR1), camR2: r(camR2), camS1: r(camS1), camS2: r(camS2),
+    cprType, isVirgin
+  };
+}
+
+function generateSignal(cpr, currentPrice, openingPrice) {
+  let reasons = [];
+  let strength = 5;
+
+  const aboveTC = currentPrice > cpr.tc;
+  const belowBC = currentPrice < cpr.bc;
+  const inCPR = currentPrice >= cpr.bc && currentPrice <= cpr.tc;
+  const gapUp = openingPrice > cpr.tc;
+  const gapDown = openingPrice < cpr.bc;
+
+  let signal, entry, sl, t1, t2, t3;
+
+  if (inCPR) {
+    signal = 'NEUTRAL'; strength = 3;
+    reasons.push('Price inside CPR — wait for breakout direction');
+    if (cpr.isVirgin) { reasons.push('Virgin CPR magnet — high-probability setup on breakout'); strength = 5; }
+    if (cpr.cprType === 'NARROW') reasons.push('Narrow CPR → Explosive move expected, wait for direction');
+    else if (cpr.cprType === 'WIDE') reasons.push('Wide CPR → Sideways day likely, range trading opportunities');
+    entry = currentPrice; sl = r(cpr.bc * 0.995); t1 = r(cpr.tc); t2 = r(cpr.r1); t3 = r(cpr.r2);
+  } else if (aboveTC) {
+    signal = 'BUY'; strength = 6;
+    reasons.push(`Price ₹${fmt(currentPrice)} above TC ₹${fmt(cpr.tc)} — Bullish bias`);
+    if (gapUp) { reasons.push('Gap up open above TC → Strong bullish momentum'); strength++; }
+    if (cpr.isVirgin) { reasons.push('Virgin CPR below price → Very strong support, high-conviction BUY'); strength += 2; }
+    if (cpr.cprType === 'NARROW') { reasons.push('Narrow CPR → Strong trending up day expected'); strength++; }
+    if (currentPrice >= cpr.r1 * 0.995) { reasons.push(`Near R1 ₹${fmt(cpr.r1)} → Watch for resistance`); strength = Math.max(4, strength - 2); }
+    if (openingPrice <= cpr.tc && currentPrice > cpr.tc) { reasons.push('Intraday breakout above TC → Strong BUY confirmation'); }
+    if (strength >= 8) signal = 'STRONG_BUY';
+    entry = currentPrice; sl = r(cpr.bc * 0.998); t1 = r(cpr.r1); t2 = r(cpr.r2); t3 = r(cpr.r3);
+  } else {
+    signal = 'SELL'; strength = 6;
+    reasons.push(`Price ₹${fmt(currentPrice)} below BC ₹${fmt(cpr.bc)} — Bearish bias`);
+    if (gapDown) { reasons.push('Gap down open below BC → Strong bearish momentum'); strength++; }
+    if (cpr.isVirgin) { reasons.push('Virgin CPR above price → Very strong resistance, high-conviction SELL'); strength += 2; }
+    if (cpr.cprType === 'NARROW') { reasons.push('Narrow CPR → Strong trending down day expected'); strength++; }
+    if (currentPrice <= cpr.s1 * 1.005) { reasons.push(`Near S1 ₹${fmt(cpr.s1)} → Watch for support/bounce`); strength = Math.max(4, strength - 2); }
+    if (strength >= 8) signal = 'STRONG_SELL';
+    entry = currentPrice; sl = r(cpr.tc * 1.002); t1 = r(cpr.s1); t2 = r(cpr.s2); t3 = r(cpr.s3);
+  }
+
+  strength = Math.min(10, Math.max(1, strength));
+  const risk = Math.abs(entry - sl);
+  const reward = Math.abs(t1 - entry);
+  const rr = risk > 0 ? r(reward / risk) : 0;
+
+  return { signal, strength, entry, sl, t1, t2, t3, rr, reasons };
+}
+
+// ── STATE ──────────────────────────────────────────────────────────────────
+let state = {
+  capital: 500000,
+  trades: JSON.parse(localStorage.getItem('pb_trades') || '[]'),
+  currentSignal: null,
+  currentCPR: null,
+  currentSymbol: 'NIFTY'
+};
+
+function saveTrades() {
+  localStorage.setItem('pb_trades', JSON.stringify(state.trades));
+}
+
+// ── CALCULATE CPR ──────────────────────────────────────────────────────────
+function calculateCPR() {
+  const symbol = document.getElementById('inp-symbol').value.trim() || 'SYMBOL';
+  const high    = parseFloat(document.getElementById('inp-high').value);
+  const low     = parseFloat(document.getElementById('inp-low').value);
+  const close   = parseFloat(document.getElementById('inp-close').value);
+  const current = parseFloat(document.getElementById('inp-current').value);
+  const open    = parseFloat(document.getElementById('inp-open').value);
+  const pcH     = parseFloat(document.getElementById('inp-pcprhigh').value) || null;
+  const pcL     = parseFloat(document.getElementById('inp-pcprlow').value)  || null;
+
+  if (!high || !low || !close || !current || !open) {
+    alert('Please fill all required fields (High, Low, Close, Current Price, Opening Price)');
+    return;
+  }
+
+  const cpr = calculateCPRLevels(high, low, close, pcH, pcL, high, low);
+  const sig = generateSignal(cpr, current, open);
+
+  state.currentCPR = { ...cpr, symbol };
+  state.currentSignal = { ...sig, symbol, cpr };
+
+  renderCPRLevels(cpr, current);
+  renderSignal(sig, cpr);
+}
+
+function renderCPRLevels(cpr, current) {
+  const levels = [
+    { name: 'R3', val: cpr.r3, color: '#ff5757', type: 'res' },
+    { name: 'R2', val: cpr.r2, color: '#ff8080', type: 'res' },
+    { name: 'R1', val: cpr.r1, color: '#ffaaaa', type: 'res' },
+    { name: 'TC', val: cpr.tc, color: '#3b8fff', type: 'tc' },
+    { name: 'PIV', val: cpr.pivot, color: '#6b7f99', type: 'piv' },
+    { name: 'BC', val: cpr.bc, color: '#3b8fff', type: 'bc' },
+    { name: 'S1', val: cpr.s1, color: '#aaffdd', type: 'sup' },
+    { name: 'S2', val: cpr.s2, color: '#00d4aa', type: 'sup' },
+    { name: 'S3', val: cpr.s3, color: '#00aa88', type: 'sup' },
+  ];
+
+  let html = `<div style="font-family: var(--mono); font-size: 12px;">`;
+
+  levels.forEach(l => {
+    const isPrice = Math.abs(current - l.val) / l.val < 0.002;
+    const isCPR = l.type === 'tc' || l.type === 'bc' || l.type === 'piv';
+
+    html += `<div style="display: flex; align-items: center; gap: 10px; padding: 5px 8px; 
+      margin-bottom: 2px; border-radius: 5px; 
+      background: ${isCPR ? 'rgba(59,143,255,0.06)' : 'transparent'};
+      border-left: ${isCPR ? '2px solid rgba(59,143,255,0.4)' : '2px solid transparent'};
+      ${isPrice ? 'background: rgba(255,184,48,0.08); border-left: 2px solid rgba(255,184,48,0.5);' : ''}">
+      <span style="width: 32px; color: ${l.color}; font-weight: 700;">${l.name}</span>
+      <div style="flex:1; height: 1px; background: rgba(255,255,255,0.05);"></div>
+      <span style="color: ${l.color};">${fmt(l.val)}</span>
+    </div>`;
+  });
+
+  html += `<div style="margin-top: 10px; padding: 8px; background: rgba(255,184,48,0.06); 
+    border: 1px solid rgba(255,184,48,0.2); border-radius: 6px; display: flex; justify-content: space-between;">
+    <span style="color: var(--muted);">Current</span>
+    <span style="color: var(--warn); font-weight: 700;">▶ ${fmt(current)}</span>
+  </div>`;
+
+  html += `<div style="margin-top: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+    <span class="cpr-type-badge cpr-${cpr.cprType}">${cpr.cprType} CPR</span>
+    <span style="font-size: 11px; color: var(--muted);">Width: ${cpr.cprWidthPct}%</span>
+    ${cpr.isVirgin ? '<span class="virgin-badge">★ VIRGIN CPR</span>' : ''}
+  </div>`;
+
+  html += `</div>`;
+  document.getElementById('cpr-levels-display').innerHTML = html;
+
+  // Update badge
+  document.getElementById('cpr-type-badge').className = `cpr-type-badge cpr-${cpr.cprType}`;
+  document.getElementById('cpr-type-badge').textContent = cpr.cprType + ' CPR';
+}
+
+function renderSignal(sig, cpr) {
+  const colors = {
+    'STRONG_BUY': 'var(--bull)', 'BUY': '#5de8c4',
+    'NEUTRAL': 'var(--neutral)',
+    'SELL': '#ff8080', 'STRONG_SELL': 'var(--bear)'
+  };
+
+  document.getElementById('sig-main').textContent = sig.signal.replace('_', ' ');
+  document.getElementById('sig-main').style.color = colors[sig.signal];
+  document.getElementById('strength-val').textContent = `${sig.strength}/10`;
+
+  const strengthPct = sig.strength * 10;
+  const barColor = sig.signal.includes('BUY') ? 'var(--bull)' : sig.signal.includes('SELL') ? 'var(--bear)' : 'var(--neutral)';
+  document.getElementById('strength-bar').style.width = strengthPct + '%';
+  document.getElementById('strength-bar').style.background = barColor;
+
+  document.getElementById('lvl-entry').textContent = fmt(sig.entry);
+  document.getElementById('lvl-sl').textContent = fmt(sig.sl);
+  document.getElementById('lvl-t1').textContent = fmt(sig.t1);
+  document.getElementById('lvl-t2').textContent = fmt(sig.t2);
+  document.getElementById('lvl-t3').textContent = fmt(sig.t3);
+  document.getElementById('lvl-width').textContent = cpr.cprWidthPct.toFixed(3) + '%';
+  document.getElementById('rr-display').textContent = `R:R 1:${sig.rr}`;
+
+  // Virgin badge
+  document.getElementById('virgin-badge-wrap').innerHTML = cpr.isVirgin ?
+    '<span class="virgin-badge">★ VIRGIN</span>' : '';
+
+  // Reasons
+  let rHTML = sig.reasons.map(r =>
+    `<div class="reason-item"><div class="reason-dot"></div><span>${r}</span></div>`
+  ).join('');
+  document.getElementById('reasons-list').innerHTML = rHTML;
+
+  // Enable paper trade button for non-neutral signals with strength >= 5
+  const canTrade = sig.signal !== 'NEUTRAL' && sig.strength >= 5;
+  document.getElementById('paper-trade-btn').disabled = !canTrade;
+  document.getElementById('paper-trade-btn').style.opacity = canTrade ? '1' : '0.4';
+}
+
+// ── PAPER TRADING ──────────────────────────────────────────────────────────
+function executePaperTrade() {
+  if (!state.currentSignal) return;
+  const sig = state.currentSignal;
+
+  // Position sizing: 1% risk on capital
+  const riskCapital = state.capital * 0.01;
+  const riskPerUnit = Math.abs(sig.entry - sig.sl);
+  const qty = riskPerUnit > 0 ? Math.max(1, Math.floor(riskCapital / riskPerUnit)) : 1;
+
+  const trade = {
+    id: Math.random().toString(36).substr(2, 6).toUpperCase(),
+    symbol: sig.symbol,
+    direction: sig.signal.includes('BUY') ? 'LONG' : 'SHORT',
+    date: new Date().toLocaleDateString('en-IN'),
+    time: new Date().toLocaleTimeString('en-IN'),
+    entry: sig.entry,
+    sl: sig.sl,
+    t1: sig.t1,
+    t2: sig.t2,
+    t3: sig.t3,
+    qty,
+    signal: sig.signal,
+    strength: sig.strength,
+    cprType: sig.cpr.cprType,
+    isVirgin: sig.cpr.isVirgin,
+    status: 'OPEN',
+    exitPrice: null,
+    pnl: 0,
+  };
+
+  state.trades.unshift(trade);
+  saveTrades();
+  renderTradeTable();
+  updatePortfolioStats();
+
+  document.getElementById('paper-trade-btn').textContent = '✓ TRADE OPENED';
+  document.getElementById('paper-trade-btn').style.background = 'linear-gradient(135deg, var(--bull), #00aa88)';
+  setTimeout(() => {
+    document.getElementById('paper-trade-btn').textContent = 'EXECUTE PAPER TRADE';
+    document.getElementById('paper-trade-btn').style.background = '';
+  }, 2000);
+}
+
+function closeTrade(tradeId, result) {
+  const trade = state.trades.find(t => t.id === tradeId);
+  if (!trade || trade.status !== 'OPEN') return;
+
+  let exitPrice;
+  if (result === 'SL')   exitPrice = trade.sl;
+  if (result === 'T1')   exitPrice = trade.t1;
+  if (result === 'T2')   exitPrice = trade.t2;
+
+  trade.status = result;
+  trade.exitPrice = exitPrice;
+
+  const pnl = trade.direction === 'LONG'
+    ? (exitPrice - trade.entry) * trade.qty
+    : (trade.entry - exitPrice) * trade.qty;
+
+  trade.pnl = r(pnl);
+  state.capital += pnl;
+
+  saveTrades();
+  renderTradeTable();
+  updatePortfolioStats();
+}
+
+function renderTradeTable() {
+  const tbody = document.getElementById('trade-tbody');
+  if (state.trades.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--muted); padding: 24px; font-family: var(--mono); font-size: 12px;">No paper trades yet. Calculate CPR → get signal → execute paper trade.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = state.trades.map(t => {
+    const statusClass = t.status === 'OPEN' ? 'status-OPEN' : t.pnl >= 0 ? 'status-win' : 'status-loss';
+    const pnlColor = t.pnl > 0 ? 'var(--bull)' : t.pnl < 0 ? 'var(--bear)' : 'var(--muted)';
+    const dirColor = t.direction === 'LONG' ? 'var(--bull)' : 'var(--bear)';
+
+    const actionBtns = t.status === 'OPEN'
+      ? `<td style="white-space: nowrap; padding-right: 8px;">
+          <button onclick="closeTrade('${t.id}','T1')" style="background: rgba(0,212,170,0.1); border: 1px solid rgba(0,212,170,0.3); color: var(--bull); border-radius: 4px; padding: 2px 6px; cursor: pointer; font-family: var(--mono); font-size: 10px; margin-right: 3px;">T1</button>
+          <button onclick="closeTrade('${t.id}','T2')" style="background: rgba(0,212,170,0.08); border: 1px solid rgba(0,212,170,0.2); color: #5de8c4; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-family: var(--mono); font-size: 10px; margin-right: 3px;">T2</button>
+          <button onclick="closeTrade('${t.id}','SL')" style="background: rgba(255,87,87,0.1); border: 1px solid rgba(255,87,87,0.3); color: var(--bear); border-radius: 4px; padding: 2px 6px; cursor: pointer; font-family: var(--mono); font-size: 10px;">SL</button>
+        </td>`
+      : `<td style="color: var(--muted); font-family: var(--mono); font-size: 11px;">Exit: ${fmt(t.exitPrice)}</td>`;
+
+    return `<tr>
+      <td style="color: var(--muted);">${t.id}</td>
+      <td style="font-weight: 700;">${t.symbol}</td>
+      <td style="color: ${dirColor}; font-weight: 700;">${t.direction}</td>
+      <td style="color: var(--muted);">${t.date}</td>
+      <td>${fmt(t.entry)}</td>
+      <td style="color: var(--bear);">${fmt(t.sl)}</td>
+      <td style="color: var(--bull);">${fmt(t.t1)}</td>
+      <td>${t.qty}</td>
+      <td><span class="status-badge ${statusClass}">${t.status}</span></td>
+      <td style="color: ${pnlColor}; font-weight: 700;">${t.pnl !== 0 ? (t.pnl > 0 ? '+' : '') + '₹' + t.pnl.toLocaleString('en-IN') : '—'}</td>
+      ${actionBtns}
+    </tr>`;
+  }).join('');
+}
+
+function updatePortfolioStats() {
+  const closed = state.trades.filter(t => t.status !== 'OPEN');
+  const winners = closed.filter(t => t.pnl > 0);
+  const totalPnl = closed.reduce((s, t) => s + t.pnl, 0);
+  const winRate = closed.length ? (winners.length / closed.length * 100).toFixed(1) : 0;
+  const grossWin = winners.reduce((s, t) => s + t.pnl, 0);
+  const grossLoss = Math.abs(closed.filter(t => t.pnl < 0).reduce((s, t) => s + t.pnl, 0));
+  const pf = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : '∞';
+  const best = closed.length ? Math.max(...closed.map(t => t.pnl)) : 0;
+
+  // drawdown calculation
+  let peak = 500000, running = 500000, maxDD = 0;
+  [...closed].reverse().forEach(t => {
+    running += t.pnl;
+    if (running > peak) peak = running;
+    const dd = ((peak - running) / peak) * 100;
+    if (dd > maxDD) maxDD = dd;
+  });
+
+  const capitalChangePct = ((state.capital - 500000) / 500000 * 100).toFixed(2);
+
+  document.getElementById('stat-pnl').textContent = (totalPnl >= 0 ? '+' : '') + '₹' + totalPnl.toLocaleString('en-IN');
+  document.getElementById('stat-pnl').className = totalPnl >= 0 ? 'stat-value green' : 'stat-value red';
+  document.getElementById('stat-pnl-pct').textContent = capitalChangePct + '% from ₹5L';
+  document.getElementById('stat-winrate').textContent = winRate + '%';
+  document.getElementById('stat-trades').textContent = closed.length + ' closed trades';
+  document.getElementById('stat-pf').textContent = pf;
+  document.getElementById('stat-best').textContent = '₹' + (best > 0 ? best : 0).toLocaleString('en-IN');
+  document.getElementById('stat-dd').textContent = maxDD.toFixed(1) + '%';
+
+  document.getElementById('capital-display').textContent = '₹' + state.capital.toLocaleString('en-IN', {maximumFractionDigits: 0});
+  document.getElementById('capital-change').textContent = (capitalChangePct >= 0 ? '+' : '') + capitalChangePct + '%';
+  document.getElementById('capital-change').className = capitalChangePct >= 0 ? 'green' : 'red';
+  document.getElementById('win-rate-display').textContent = winRate + '%';
+  document.getElementById('trades-display').textContent = closed.length;
+}
+
+function selectSymbol(sym) {
+  state.currentSymbol = sym;
+  document.querySelectorAll('.symbol-card').forEach(c => c.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+
+  const presets = {
+    NIFTY:     { high: 24850, low: 24450, close: 24700, current: 24780, open: 24720, pcH: 24750, pcL: 24650 },
+    BANKNIFTY: { high: 52400, low: 51800, close: 52100, current: 51950, open: 52050, pcH: 52200, pcL: 52050 },
+    RELIANCE:  { high: 2980,  low: 2920,  close: 2955,  current: 2968,  open: 2960,  pcH: 2965,  pcL: 2940 },
+  };
+
+  const d = presets[sym];
+  if (d) {
+    document.getElementById('inp-symbol').value  = sym;
+    document.getElementById('inp-high').value    = d.high;
+    document.getElementById('inp-low').value     = d.low;
+    document.getElementById('inp-close').value   = d.close;
+    document.getElementById('inp-current').value = d.current;
+    document.getElementById('inp-open').value    = d.open;
+    document.getElementById('inp-pcprhigh').value = d.pcH;
+    document.getElementById('inp-pcprlow').value  = d.pcL;
+    calculateCPR();
+  }
+}
+
+function resetTrades() {
+  if (confirm('Reset all paper trades and portfolio to ₹5,00,000?')) {
+    state.trades = [];
+    state.capital = 500000;
+    saveTrades();
+    renderTradeTable();
+    updatePortfolioStats();
+  }
+}
+
+function showAddSymbol() {
+  const sym = prompt('Enter symbol (e.g. TCS, HDFC, INFY):');
+  if (sym) alert('In the live version with Zerodha API, this will auto-fetch OHLC for ' + sym.toUpperCase() + '. For now, enter the values manually in the form above.');
+}
+
+// ── UTILITIES ──────────────────────────────────────────────────────────────
+function r(val, dec = 2) { return Math.round(val * Math.pow(10, dec)) / Math.pow(10, dec); }
+function fmt(val) { return val ? '₹' + Number(val).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'; }
+
+// ── CLOCK ──────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  document.getElementById('clock').textContent = now;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+renderTradeTable();
+updatePortfolioStats();
+calculateCPR(); // auto-calculate NIFTY on load
+</script>
+</body>
+</html>

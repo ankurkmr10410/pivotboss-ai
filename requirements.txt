@@ -1,0 +1,23 @@
+# PivotBoss AI — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Kotak Neo API (official SDK)
+neo_api_client @ git+https://github.com/Kotak-Neo/Kotak-neo-api-v2.git@v2.0.1
+
+# Core
+python-dotenv>=1.0.0
+requests>=2.31.0
+pandas>=2.0.0
+numpy>=1.24.0
+websockets>=11.0
+websocket-client>=1.6.0
+
+# Scheduling (for running bot at market open)
+schedule>=1.2.0
+
+# API server (for connecting dashboard to backend)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Testing
+pytest>=7.4.0

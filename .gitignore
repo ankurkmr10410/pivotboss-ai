@@ -1,0 +1,42 @@
+# ── SECRETS — NEVER COMMIT THESE ──────────────────────────────
+config/.env
+*.env
+.env.*
+!config/.env.example
+
+# ── PYTHON ─────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+env/
+.venv/
+
+# ── DATA & LOGS (runtime files) ────────────────────────────────
+logs/*.log
+data/paper_trades.json
+data/daily_analysis.json
+data/*.json
+
+# ── IDE ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── NODE (if you add a Node frontend later) ────────────────────
+node_modules/
+npm-debug.log
+
+# ── JUPYTER ────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
