@@ -23,6 +23,8 @@ def main():
     conn = get_connector(mock=False)
 
     print(f"Using environment: {conn.environment}")
+    print(f"KOTAK_MOBILE (digits-only): {conn.mobile_number}")
+    print(f"KOTAK_UCC: {conn.ucc}")
 
     if isinstance(conn, MockKotakConnector):
         print("Using MOCK connector (no credentials found). Sample quote:")

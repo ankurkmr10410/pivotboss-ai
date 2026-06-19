@@ -41,13 +41,14 @@ class KotakConnector:
     """
 
     def __init__(self):
-        self.consumer_key    = os.getenv("KOTAK_CONSUMER_KEY", "")
-        self.consumer_secret = os.getenv("KOTAK_CONSUMER_SECRET", "")
-        self.neo_fin_key     = os.getenv("KOTAK_NEOFINK", "")
-        self.mobile_number   = os.getenv("KOTAK_MOBILE", "")
-        self.ucc             = os.getenv("KOTAK_UCC", "")
-        self.password        = os.getenv("KOTAK_PASSWORD", "")
-        self.mpin            = os.getenv("KOTAK_MPIN", "")
+        self.consumer_key    = os.getenv("KOTAK_CONSUMER_KEY", "").strip()
+        self.consumer_secret = os.getenv("KOTAK_CONSUMER_SECRET", "").strip()
+        self.neo_fin_key     = os.getenv("KOTAK_NEOFINK", "").strip()
+        raw_mobile           = os.getenv("KOTAK_MOBILE", "")
+        self.mobile_number   = "".join(ch for ch in raw_mobile if ch.isdigit())
+        self.ucc             = os.getenv("KOTAK_UCC", "").strip().upper()
+        self.password        = os.getenv("KOTAK_PASSWORD", "").strip()
+        self.mpin            = os.getenv("KOTAK_MPIN", "").strip()
         self.environment     = os.getenv("KOTAK_ENVIRONMENT", "prod")
 
         self.client = None
@@ -111,6 +112,9 @@ class KotakConnector:
             logger.error(f"OTP error: {e}")
             return False
 
+    def _mask_mobile(self, mobile: str) -> str:
+        return mobile[-4:].rjust(len(mobile), "*") if mobile else ""
+
     def totp_login(self, ucc: Optional[str] = None, totp: Optional[str] = None) -> bool:
         """Step 1 of Kotak Neo v2 TOTP flow: create the view token."""
         try:
@@ -130,6 +134,14 @@ class KotakConnector:
             if missing:
                 logger.error("Missing Kotak TOTP login value(s): %s", ", ".join(missing))
                 return False
+            if not (self.mobile_number.isdigit() and len(self.mobile_number) in (10, 12)):
+                logger.error(
+                    "Invalid KOTAK_MOBILE value. Mobile number must be 10 digits or 91-prefixed 12 digits."
+                )
+                return False
+
+            masked_mobile = self._mask_mobile(self.mobile_number)
+            logger.info("Attempting Kotak TOTP login with mobile: %s", masked_mobile)
 
             resp = self.client.totp_login(
                 mobile_number=self.mobile_number,
@@ -137,7 +149,26 @@ class KotakConnector:
                 totp=totp,
             )
             if self._response_has_error(resp):
-                logger.error("TOTP login failed: %s", self._safe_response(resp))
+                # Retry with country prefix if the first attempt fails on 10-digit numbers.
+                if len(self.mobile_number) == 10:
+                    alt_mobile = "91" + self.mobile_number
+                    logger.warning(
+                        "TOTP first attempt failed. Retrying with country prefix: 91%s",
+                        self._mask_mobile(self.mobile_number)
+                    )
+                    resp2 = self.client.totp_login(
+                        mobile_number=alt_mobile,
+                        ucc=ucc,
+                        totp=totp,
+                    )
+                    if not self._response_has_error(resp2):
+                        self.client.api_client.configuration.view_token = resp2["data"]["token"]
+                        self.client.api_client.configuration.sid = resp2["data"]["sid"]
+                        logger.info("Kotak Neo TOTP login accepted with 91-prefixed mobile.")
+                        return True
+                    logger.error("TOTP login retry failed: %s", self._safe_response(resp2))
+                else:
+                    logger.error("TOTP login failed: %s", self._safe_response(resp))
                 return False
 
             logger.info("Kotak Neo TOTP login accepted. Validate MPIN next.")
