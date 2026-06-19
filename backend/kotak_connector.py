@@ -23,15 +23,33 @@ load_dotenv("config/.env")
 logger = logging.getLogger(__name__)
 
 # ── SYMBOL MAP ────────────────────────────────────────────────────────────────
-# Kotak Neo uses exchange tokens — these are the standard ones
-SYMBOL_TOKENS = {
-    "NIFTY":      {"exchange": "nse_fo", "token": "26000", "lot_size": 25},
-    "BANKNIFTY":  {"exchange": "nse_fo", "token": "26009", "lot_size": 15},
+# Kotak Neo uses exchange tokens. The authoritative map now lives in
+# config/watchlist.yaml (loaded by config_loader.Watchlist). The static dict
+# below is a fallback used only if the yaml is unavailable, so the module still
+# imports standalone.
+_FALLBACK_SYMBOL_TOKENS = {
+    "NIFTY":      {"exchange": "nse_fo", "token": "26000", "lot_size": 75},
+    "BANKNIFTY":  {"exchange": "nse_fo", "token": "26009", "lot_size": 35},
     "RELIANCE":   {"exchange": "nse_cm", "token": "2885",  "lot_size": 1},
     "HDFCBANK":   {"exchange": "nse_cm", "token": "1333",  "lot_size": 1},
     "TCS":        {"exchange": "nse_cm", "token": "11536", "lot_size": 1},
     "INFY":       {"exchange": "nse_cm", "token": "1594",  "lot_size": 1},
 }
+
+
+def _load_symbol_tokens() -> dict:
+    """Load SYMBOL_TOKENS from config/watchlist.yaml, with a static fallback."""
+    try:
+        from config_loader import Watchlist
+        kotak_map = Watchlist().kotak_map()
+        if kotak_map:
+            return kotak_map
+    except Exception:
+        pass
+    return dict(_FALLBACK_SYMBOL_TOKENS)
+
+
+SYMBOL_TOKENS = _load_symbol_tokens()
 
 
 class KotakConnector:

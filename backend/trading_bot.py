@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from cpr_engine    import calculate_cpr, generate_signal, run_analysis
 from paper_trader  import PaperTrader, TradeStatus
 from kotak_connector import get_connector
+from config_loader import Watchlist
+from providers.yahoo_provider import YahooProvider
 
 # Ensure logging directory exists
 Path("logs").mkdir(exist_ok=True)
@@ -50,7 +52,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-WATCHLIST = ["NIFTY", "BANKNIFTY", "RELIANCE", "HDFCBANK", "TCS"]
+# Watchlist is now the single source of truth (config/watchlist.yaml).
+WATCHLIST = Watchlist().names()
 DATA_FILE  = "data/daily_analysis.json"
 TRADE_FILE = "data/paper_trades.json"
 
@@ -62,6 +65,9 @@ class PivotBossBot:
         self.connector = get_connector(mock=mock)
         self.trader    = self._load_trader()
         self.analysis  = {}   # symbol → {cpr, signal}
+        # EOD provider (Yahoo) for previous-day OHLC. Broker login is NOT required.
+        # See ROADMAP.md — CPR setup must not depend on a live session.
+        self.eod_provider = YahooProvider.from_watchlist(Watchlist())
         logger.info(f"PivotBoss Bot initialized | Mock={mock}")
 
     def _load_trader(self) -> PaperTrader:
@@ -74,10 +80,44 @@ class PivotBossBot:
 
     # ── STEP 1: MORNING SETUP (run at 9:00 AM) ─────────────────────────────
 
+    def _fetch_eod_candles(self, symbol: str, days: int = 3):
+        """
+        Previous-day OHLC for CPR.
+
+        Source priority:
+          1. Yahoo (EOD) — no login, bulletproof. Always try first.
+          2. Broker historical — fallback if Yahoo is unavailable.
+
+        Returns a list of candle dicts (most-recent last), or [] on failure.
+        """
+        # 1) Yahoo EOD
+        try:
+            candles = self.eod_provider.get_eod_ohlc(symbol, days=days)
+            if candles:
+                logger.info(f"  {symbol}: EOD via Yahoo ({len(candles)} candles)")
+                return [c.to_dict() for c in candles]
+        except NotImplementedError:
+            pass
+        except Exception as e:
+            logger.warning(f"  {symbol}: Yahoo EOD unavailable ({e}); falling back to broker.")
+
+        # 2) Broker fallback
+        try:
+            candles = self.connector.get_historical_ohlc(symbol, days=days)
+            if candles:
+                logger.info(f"  {symbol}: EOD via broker fallback ({len(candles)} candles)")
+            return candles or []
+        except Exception as e:
+            logger.error(f"  {symbol}: broker EOD fallback also failed: {e}")
+            return []
+
     def morning_setup(self):
         """
-        Fetch yesterday's OHLC, calculate CPR for all symbols.
+        Fetch yesterday's OHLC and calculate CPR for all symbols.
         Run this at 9:00 AM before market opens.
+
+        EOD comes from Yahoo (no broker login needed); broker historical is used
+        only as a fallback.
         """
         logger.info("=" * 60)
         logger.info("  MORNING SETUP — Calculating CPR for all symbols")
@@ -87,14 +127,14 @@ class PivotBossBot:
 
         for symbol in WATCHLIST:
             try:
-                candles = self.connector.get_historical_ohlc(symbol, days=3)
+                candles = self._fetch_eod_candles(symbol, days=3)
                 if len(candles) < 2:
                     logger.warning(f"Not enough data for {symbol}")
                     continue
 
-                # Yesterday = second-last candle, day before = third-last
+                # Yesterday = last candle, day before = second-last (virgin check)
                 prev   = candles[-1]   # yesterday
-                prev2  = candles[-2]   # day before yesterday (for virgin check)
+                prev2  = candles[-2]   # day before yesterday
 
                 # Build CPR from yesterday's data
                 cpr = calculate_cpr(

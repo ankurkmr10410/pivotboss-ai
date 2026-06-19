@@ -1,0 +1,65 @@
+# PivotBoss AI — Watchlist
+# -----------------------------------------------------------------------------
+# Single source of truth for every traded/watched symbol. Each entry tells every
+# data provider how to reach the symbol:
+#   name         : internal symbol name used across the codebase (UPPERCASE)
+#   segment      : index | stock | futures
+#   yahoo_ticker : Yahoo Finance ticker for EOD OHLC (no login needed)
+#                    stocks  -> "<SYMBOL>.NS"
+#                    NIFTY   -> "^NSEI"        (spot index)
+#                    BANKEX  -> "^NSEBANK"     (spot index)
+#   kotak        : exchange + token for the Kotak Neo connector (live + orders)
+#   lot_size     : market lot — VERIFY on nseindia.com (NSE revises periodically)
+#
+# Add or remove symbols here; the bot, the connector and the Yahoo provider all
+# read from this file. No code changes required.
+# -----------------------------------------------------------------------------
+
+symbols:
+  - name: NIFTY
+    segment: index
+    yahoo_ticker: "^NSEI"
+    kotak:
+      exchange: nse_fo
+      token: "26000"
+    lot_size: 75        # verify on nseindia.com
+
+  - name: BANKNIFTY
+    segment: index
+    yahoo_ticker: "^NSEBANK"
+    kotak:
+      exchange: nse_fo
+      token: "26009"
+    lot_size: 35        # verify on nseindia.com
+
+  - name: RELIANCE
+    segment: stock
+    yahoo_ticker: "RELIANCE.NS"
+    kotak:
+      exchange: nse_cm
+      token: "2885"
+    lot_size: 1
+
+  - name: HDFCBANK
+    segment: stock
+    yahoo_ticker: "HDFCBANK.NS"
+    kotak:
+      exchange: nse_cm
+      token: "1333"
+    lot_size: 1
+
+  - name: TCS
+    segment: stock
+    yahoo_ticker: "TCS.NS"
+    kotak:
+      exchange: nse_cm
+      token: "11536"
+    lot_size: 1
+
+  - name: INFY
+    segment: stock
+    yahoo_ticker: "INFY.NS"
+    kotak:
+      exchange: nse_cm
+      token: "1594"
+    lot_size: 1

@@ -4,11 +4,15 @@
 # Kotak Neo API (official SDK)
 neo_api_client @ git+https://github.com/Kotak-Neo/Kotak-neo-api-v2.git@v2.0.1
 
+# EOD market data (previous-day OHLC for CPR — no broker login needed)
+yfinance>=0.2.40
+
 # Core
 python-dotenv>=1.0.0
 requests>=2.31.0
 pandas>=2.0.0
 numpy>=1.24.0
+pyyaml>=6.0
 websockets>=11.0
 websocket-client>=1.6.0
 
