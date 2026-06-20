@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict
+from datetime import date
 from typing import Optional, List
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,20 @@ class MarketDataProvider(ABC):
         (today's in-progress session is excluded).
         """
         ...
+
+    def get_history_range(
+        self, symbol: str, start: date, end: date
+    ) -> List[Candle]:
+        """Return complete daily candles between [start, end] inclusive, oldest first.
+
+        Default implementation slices from `get_eod_ohlc`. Providers with bulk
+        fetch (e.g. Yahoo) override this for efficient multi-year backtests.
+        """
+        from datetime import timedelta
+        days = max(1, (end - start).days + 1)
+        candles = self.get_eod_ohlc(symbol, days=days + 60)  # buffer for weekends/hols
+        start_s, end_s = start.isoformat(), end.isoformat()
+        return [c for c in candles if start_s <= c.date <= end_s]
 
     def get_ltp(self, symbol: str) -> Optional[float]:
         """Last traded price. EOD-only providers do not implement this."""

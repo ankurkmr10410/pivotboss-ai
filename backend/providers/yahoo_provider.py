@@ -17,7 +17,7 @@ watchlist only if you specifically need future-based levels.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Callable, Dict, List, Optional
 
 from data_provider import Candle, MarketDataProvider
@@ -32,15 +32,19 @@ class YahooProvider(MarketDataProvider):
         self,
         symbol_map: Optional[Dict[str, str]] = None,
         fetcher: Optional[Callable[[str, int], "object"]] = None,
+        range_fetcher: Optional[Callable[[str, date, date], "object"]] = None,
     ):
         """
         Args:
-            symbol_map: internal symbol name → Yahoo ticker (e.g. {"RELIANCE": "RELIANCE.NS"}).
-            fetcher:    injectable fetch fn (ticker, days) -> DataFrame; defaults to yfinance.
-                        Used for offline testing.
+            symbol_map:  internal symbol name → Yahoo ticker (e.g. {"RELIANCE": "RELIANCE.NS"}).
+            fetcher:     injectable fetch fn (ticker, days) -> DataFrame; defaults to yfinance.
+                         Used for offline testing.
+            range_fetcher: injectable fetch fn (ticker, start, end) -> DataFrame for bulk
+                         multi-year fetch. Defaults to yfinance start/end.
         """
         self.symbol_map = symbol_map or {}
         self._fetcher = fetcher or self._default_fetch
+        self._range_fetcher = range_fetcher or self._default_range_fetch
 
     # ── CONSTRUCTION HELPERS ────────────────────────────────────────────────
 
@@ -65,6 +69,22 @@ class YahooProvider(MarketDataProvider):
 
         return self._parse_history(hist, days)
 
+    def get_history_range(self, symbol: str, start: date, end: date) -> List[Candle]:
+        """Bulk multi-year fetch for backtesting."""
+        ticker = self.symbol_map.get(symbol)
+        if not ticker:
+            logger.error("No Yahoo ticker mapped for symbol '%s'.", symbol)
+            return []
+        try:
+            hist = self._range_fetcher(ticker, start, end)
+        except Exception as e:
+            logger.error("Yahoo range fetch failed for %s (%s): %s", symbol, ticker, e)
+            return []
+        candles = self._parse_history(hist, days=None)
+        # filter to requested window and return oldest-first
+        start_s, end_s = start.isoformat(), end.isoformat()
+        return [c for c in candles if start_s <= c.date <= end_s]
+
     # ── INTERNALS ───────────────────────────────────────────────────────────
 
     @staticmethod
@@ -77,7 +97,13 @@ class YahooProvider(MarketDataProvider):
         return yf.Ticker(ticker).history(period=f"{days + 5}d", auto_adjust=False)
 
     @staticmethod
-    def _parse_history(hist, days: int) -> List[Candle]:
+    def _default_range_fetch(ticker: str, start: date, end: date):
+        """Bulk fetch by explicit [start, end] for multi-year backtests."""
+        import yfinance as yf
+        return yf.Ticker(ticker).history(start=start.isoformat(), end=end.isoformat(), auto_adjust=False)
+
+    @staticmethod
+    def _parse_history(hist, days: Optional[int] = None) -> List[Candle]:
         if hist is None:
             return []
         try:
@@ -105,7 +131,7 @@ class YahooProvider(MarketDataProvider):
                 logger.warning("Skipping malformed Yahoo row %s: %s", date_str, e)
                 continue
 
-        # Drop today's in-progress session — CPR must use a *completed* day.
+        # Drop today's in-progress session — CPR must use a completed day.
         today = datetime.now().strftime("%Y-%m-%d")
         while candles and candles[-1].date == today:
             candles.pop()
@@ -113,4 +139,6 @@ class YahooProvider(MarketDataProvider):
         if not candles:
             return []
 
+        if days is None:
+            return candles
         return candles[-days:]
