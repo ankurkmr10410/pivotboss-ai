@@ -19,11 +19,15 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import logging
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+
+# Ensure stdout handles Unicode on Windows (cp1252 lacks → etc.)
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Make backend/ importable when run from repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))

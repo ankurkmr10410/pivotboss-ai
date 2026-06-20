@@ -387,6 +387,11 @@ def run_analysis(data: dict) -> dict:
 
 
 if __name__ == "__main__":
+    import io
+    import sys as _sys
+    # Ensure stdout handles Unicode on Windows (cp1252 lacks → ₹ etc.)
+    _sys.stdout = io.TextIOWrapper(_sys.stdout.buffer, encoding="utf-8", errors="replace")
+
     import json
     for sym, data in SAMPLE_DATA.items():
         result = run_analysis(data)
