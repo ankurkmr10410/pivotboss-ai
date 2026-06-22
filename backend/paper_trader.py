@@ -62,6 +62,55 @@ class PaperPortfolio:
     max_risk_per_trade_pct: float = 1.0   # Max 1% risk per trade
     max_open_positions: int = 3           # Max 3 positions at a time
 
+    def get_stats(self) -> dict:
+        """Compute aggregate stats from the closed-trade list.
+
+        Lives on the portfolio (not on PaperTrader) so to_dict() / persistence
+        can call it without a trader reference.
+        """
+        closed = [t for t in self.trades if t.status != TradeStatus.OPEN.value]
+        if not closed:
+            return {
+                "total_trades": 0, "open_trades": len(self.trades),
+                "win_rate": 0, "total_pnl": 0, "avg_pnl": 0,
+                "best_trade": 0, "worst_trade": 0,
+                "profit_factor": 0, "max_drawdown": 0,
+                "capital_change_pct": 0.0,
+            }
+
+        winners = [t for t in closed if t.pnl > 0]
+        losers = [t for t in closed if t.pnl <= 0]
+        total_pnl = sum(t.pnl for t in closed)
+        gross_profit = sum(t.pnl for t in winners)
+        gross_loss = abs(sum(t.pnl for t in losers))
+
+        # Track running capital for drawdown
+        running = self.starting_capital
+        peak = running
+        max_dd = 0
+        for t in closed:
+            running += t.pnl
+            if running > peak:
+                peak = running
+            dd = (peak - running) / peak * 100
+            max_dd = max(max_dd, dd)
+
+        return {
+            "total_trades": len(closed),
+            "open_trades": len([t for t in self.trades if t.status == TradeStatus.OPEN.value]),
+            "win_rate": round(len(winners) / len(closed) * 100, 1) if closed else 0,
+            "total_pnl": round(total_pnl, 2),
+            "avg_pnl": round(total_pnl / len(closed), 2) if closed else 0,
+            "best_trade": round(max((t.pnl for t in closed), default=0), 2),
+            "worst_trade": round(min((t.pnl for t in closed), default=0), 2),
+            "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else 999,
+            "max_drawdown": round(max_dd, 2),
+            "capital_change_pct": round(
+                (self.current_capital - self.starting_capital) /
+                self.starting_capital * 100, 2
+            ),
+        }
+
     def to_dict(self):
         return {
             "starting_capital": self.starting_capital,
@@ -188,59 +237,48 @@ class PaperTrader:
             trade.notes = f"Target {target_num} achieved"
 
     def get_stats(self) -> dict:
-        closed = [t for t in self.portfolio.trades if t.status != TradeStatus.OPEN.value]
-        if not closed:
-            return {
-                "total_trades": 0, "open_trades": len(self.portfolio.trades),
-                "win_rate": 0, "total_pnl": 0, "avg_pnl": 0,
-                "best_trade": 0, "worst_trade": 0,
-                "profit_factor": 0, "max_drawdown": 0,
-            }
+        """Delegate to the portfolio (stats now live there)."""
+        return self.portfolio.get_stats()
 
-        winners = [t for t in closed if t.pnl > 0]
-        losers = [t for t in closed if t.pnl <= 0]
-        total_pnl = sum(t.pnl for t in closed)
-        gross_profit = sum(t.pnl for t in winners)
-        gross_loss = abs(sum(t.pnl for t in losers))
-
-        # Track running capital for drawdown
-        running = self.portfolio.starting_capital
-        peak = running
-        max_dd = 0
-        for t in closed:
-            running += t.pnl
-            if running > peak:
-                peak = running
-            dd = (peak - running) / peak * 100
-            max_dd = max(max_dd, dd)
-
-        return {
-            "total_trades": len(closed),
-            "open_trades": len([t for t in self.portfolio.trades if t.status == TradeStatus.OPEN.value]),
-            "win_rate": round(len(winners) / len(closed) * 100, 1) if closed else 0,
-            "total_pnl": round(total_pnl, 2),
-            "avg_pnl": round(total_pnl / len(closed), 2) if closed else 0,
-            "best_trade": round(max((t.pnl for t in closed), default=0), 2),
-            "worst_trade": round(min((t.pnl for t in closed), default=0), 2),
-            "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else 999,
-            "max_drawdown": round(max_dd, 2),
-            "capital_change_pct": round(
-                (self.portfolio.current_capital - self.portfolio.starting_capital) /
-                self.portfolio.starting_capital * 100, 2
-            ),
-        }
+    # ── JSON persistence (legacy, kept as backup) ────────────────────────
 
     def save(self, path: str = "paper_trades.json"):
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(self.portfolio.to_dict(), f, indent=2)
 
     @classmethod
     def load(cls, path: str = "paper_trades.json") -> "PaperTrader":
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         trader = cls(starting_capital=data["starting_capital"])
         trader.portfolio.current_capital = data["current_capital"]
         trader.portfolio.trades = [Trade(**t) for t in data["trades"]]
+        # Restore config the old loader dropped (best-effort).
+        trader.portfolio.max_risk_per_trade_pct = data.get("max_risk_per_trade_pct", 1.0)
+        trader.portfolio.max_open_positions = data.get("max_open_positions", 3)
+        return trader
+
+    # ── SQLite persistence (async, primary store) ───────────────────────
+
+    async def save_to_store(self, store: "MarketStore") -> None:
+        """Persist all trades + portfolio config to the async SQLite store."""
+        await store.upsert_trades(self.portfolio.trades)
+        await store.save_portfolio_config(self.portfolio)
+        # Snapshot equity for the curve.
+        open_n = len([t for t in self.portfolio.trades
+                      if t.status == TradeStatus.OPEN.value])
+        await store.append_equity(self.portfolio.current_capital, open_n)
+
+    @classmethod
+    async def load_from_store(cls, store: "MarketStore") -> "PaperTrader":
+        """Reconstruct a trader from the store. Restores all config fields."""
+        cfg = await store.load_portfolio_config()
+        starting = cfg.get("starting_capital", 500000.0)
+        trader = cls(starting_capital=starting)
+        trader.portfolio.current_capital = cfg.get("current_capital", starting)
+        trader.portfolio.max_risk_per_trade_pct = cfg.get("max_risk_per_trade_pct", 1.0)
+        trader.portfolio.max_open_positions = int(cfg.get("max_open_positions", 3))
+        trader.portfolio.trades = await store.get_all_trades()
         return trader
 
 

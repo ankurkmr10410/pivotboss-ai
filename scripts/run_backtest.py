@@ -19,6 +19,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import io
 import json
 import logging
@@ -36,6 +37,8 @@ from config_loader import Watchlist
 from providers.yahoo_provider import YahooProvider
 from backtester import CPRBacktester
 from alerts import get_alert_provider
+from data_provider import Candle
+from db import MarketStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,6 +89,13 @@ def main():
                    help="Alert channel for the summary")
     p.add_argument("--cache", help="Path to a JSON cache of candles {symbol:[{date,open,high,low,close},...]}. "
                                    "Bypasses Yahoo (useful when Yahoo rate-limits). Keys are symbol names.")
+    p.add_argument("--db", nargs="?", const="data/pivotboss.db", default=None,
+                   help="Cache candles in SQLite (default DB: data/pivotboss.db). "
+                        "Reuses cached candles on repeat runs — avoids Yahoo rate-limiting. "
+                        "Pass a path to use a custom DB location.")
+    p.add_argument("--refresh", action="store_true",
+                   help="With --db: ignore cached candles and re-fetch from Yahoo, "
+                        "then overwrite the DB cache.")
     args = p.parse_args()
 
     if not args.symbol and not args.all:
@@ -112,17 +122,34 @@ def main():
             logger.warning("Could not load cache %s: %s — will fetch live.", args.cache, e)
 
     provider = YahooProvider.from_watchlist(wl)
+    store = None
+    if args.db:
+        store = MarketStore(db_path=Path(args.db))
+        asyncio.run(store.init())
+        logger.info("SQLite candle cache: %s", store.db_path)
+
     all_lines = []
     for sym in symbols:
         candle_dicts = []
         if sym in cache:
             candle_dicts = cache[sym]
-            logger.info("Using cached candles for %s (%d).", sym, len(candle_dicts))
-        else:
+            logger.info("Using JSON-cached candles for %s (%d).", sym, len(candle_dicts))
+        elif store is not None and not args.refresh:
+            cached = asyncio.run(store.get_candles(sym, start=str(start), end=str(end)))
+            if cached:
+                candle_dicts = [c.to_dict() for c in cached]
+                logger.info("Using DB-cached candles for %s (%d).", sym, len(candle_dicts))
+        if not candle_dicts:
             logger.info("Fetching %s history (%s → %s)...", sym, start, end)
             candles = provider.get_history_range(sym, start, end)
             candle_dicts = [c.to_dict() for c in candles]
             logger.info("  got %d candles.", len(candle_dicts))
+            # Persist fetched candles to the DB for next time.
+            if store is not None and candles:
+                asyncio.run(store.upsert_symbol_candles(
+                    sym, [Candle(**c) for c in candle_dicts], source="yahoo"
+                ))
+                logger.info("  cached %d candles to DB.", len(candles))
 
         if len(candle_dicts) < 3:
             logger.warning("Not enough data for %s — skipping.", sym)

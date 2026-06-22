@@ -7,6 +7,7 @@ Run this every morning at 9:00 AM IST before market opens.
 import os
 import json
 import time
+import asyncio
 import logging
 import sys
 from datetime import datetime
@@ -20,6 +21,7 @@ from paper_trader  import PaperTrader, TradeStatus
 from kotak_connector import get_connector
 from config_loader import Watchlist
 from providers.yahoo_provider import YahooProvider
+from db import MarketStore
 
 # Ensure logging directory exists
 Path("logs").mkdir(exist_ok=True)
@@ -63,6 +65,9 @@ class PivotBossBot:
     def __init__(self, mock: bool = True):
         self.mock      = mock
         self.connector = get_connector(mock=mock)
+        self.store     = MarketStore()
+        # Init schema + one-time JSON→SQLite migration, then load trader from DB.
+        self._init_store()
         self.trader    = self._load_trader()
         self.analysis  = {}   # symbol → {cpr, signal}
         # EOD provider (Yahoo) for previous-day OHLC. Broker login is NOT required.
@@ -70,13 +75,19 @@ class PivotBossBot:
         self.eod_provider = YahooProvider.from_watchlist(Watchlist())
         logger.info(f"PivotBoss Bot initialized | Mock={mock}")
 
+    def _init_store(self) -> None:
+        """Create tables and migrate any legacy JSON portfolio into SQLite."""
+        asyncio.run(self.store.init())
+        if asyncio.run(self.store.needs_migration(Path(TRADE_FILE))):
+            logger.info("Migrating legacy %s into SQLite...", TRADE_FILE)
+            asyncio.run(self.store.migrate_from_json(Path(TRADE_FILE)))
+
     def _load_trader(self) -> PaperTrader:
-        if os.path.exists(TRADE_FILE):
-            try:
-                return PaperTrader.load(TRADE_FILE)
-            except Exception:
-                pass
-        return PaperTrader(starting_capital=500000)
+        try:
+            return asyncio.run(PaperTrader.load_from_store(self.store))
+        except Exception as e:
+            logger.warning(f"Store load failed ({e}); starting fresh trader.")
+            return PaperTrader(starting_capital=500000)
 
     # ── STEP 1: MORNING SETUP (run at 9:00 AM) ─────────────────────────────
 
@@ -242,7 +253,7 @@ class PivotBossBot:
         if trade:
             logger.info(f"  📋 Paper trade opened: {trade.symbol} {trade.direction} "
                         f"| Entry: ₹{trade.entry_price} | SL: ₹{trade.stop_loss} | Qty: {trade.quantity}")
-            self.trader.save(TRADE_FILE)
+            self._save_trader()
 
     # ── STEP 4: INTRADAY MONITOR ────────────────────────────────────────────
 
@@ -275,7 +286,7 @@ class PivotBossBot:
                         f"  {pnl_color} {trade.symbol} closed | {closed.status} | "
                         f"Exit: ₹{closed.exit_price} | P&L: ₹{closed.pnl:+.2f}"
                     )
-                    self.trader.save(TRADE_FILE)
+                    self._save_trader()
 
             stats = self.trader.get_stats()
             logger.info(
@@ -306,10 +317,43 @@ class PivotBossBot:
         print(f"  Worst Trade      : ₹{stats['worst_trade']:>+,.0f}")
         print(f"  Max Drawdown     : {stats['max_drawdown']}%")
 
-    def _save_analysis(self):
+    def _save_trader(self) -> None:
+        """Persist the paper trader to SQLite (primary) + JSON (backup)."""
+        try:
+            asyncio.run(self.trader.save_to_store(self.store))
+        except Exception as e:
+            logger.warning(f"Store save failed ({e}); falling back to JSON.")
+            try:
+                self.trader.save(TRADE_FILE)
+            except Exception as ee:
+                logger.error(f"JSON save also failed: {ee}")
+
+    def _save_analysis(self) -> None:
+        """Persist analysis to JSON (dashboard) and CPR/signal rows to SQLite."""
         Path("data").mkdir(exist_ok=True)
-        with open(DATA_FILE, "w") as f:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(self.analysis, f, indent=2, default=str)
+
+        # Also persist structured rows to the store (for FastAPI / queries).
+        from cpr_engine import CPRLevels, TradeSignal
+        for symbol, payload in self.analysis.items():
+            try:
+                cpr = CPRLevels(**{k: v for k, v in payload["cpr"].items()})
+                sig_dict = payload.get("signal")
+                signal = None
+                if sig_dict:
+                    # cpr_levels is a required field on TradeSignal; reuse the
+                    # dict we already persisted (it's a copy of the CPR dict).
+                    sig_copy = dict(sig_dict)
+                    sig_copy["cpr_levels"] = dict(payload["cpr"])
+                    signal = TradeSignal(**sig_copy)
+                asyncio.run(self.store.save_analysis(
+                    symbol, cpr,
+                    prev_candle=payload.get("prev_candle"),
+                    signal=signal,
+                ))
+            except Exception as e:
+                logger.warning(f"Could not persist analysis row for {symbol}: {e}")
 
     def get_status(self) -> dict:
         """Return current bot status as dict (used by dashboard API)"""

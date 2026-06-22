@@ -24,6 +24,8 @@ logs/*.log
 data/paper_trades.json
 data/daily_analysis.json
 data/*.json
+data/*.db
+data/*.db-journal
 
 # ── IDE ────────────────────────────────────────────────────────
 .vscode/
