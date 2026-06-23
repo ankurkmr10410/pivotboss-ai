@@ -16,8 +16,8 @@ pyyaml>=6.0
 websockets>=11.0
 websocket-client>=1.6.0
 
-# Scheduling (for running bot at market open)
-schedule>=1.2.0
+# Scheduling (automated daily market cycle — Phase 2.1)
+apscheduler>=3.10.0
 
 # API server (for connecting dashboard to backend)
 fastapi>=0.104.0
