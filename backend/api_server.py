@@ -38,8 +38,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -326,6 +327,57 @@ def scheduler_status() -> Dict[str, Any]:
     return scheduler.get_status()
 
 
+# ── live market data ───────────────────────────────────────────────────────
+
+@app.get("/api/ltp/{symbol}")
+def ltp(symbol: str) -> Dict[str, Any]:
+    """Live quote for a symbol from the active connector (live or mock)."""
+    if bot is None:
+        raise HTTPException(503, "Bot not initialised")
+    sym = symbol.strip().upper()
+    quote = bot.connector.get_quotes(sym)
+    if not quote:
+        raise HTTPException(404, f"No quote for {sym} (connector may be offline)")
+    return {
+        "symbol": sym,
+        "ltp": quote.get("ltp"),
+        "open": quote.get("open"),
+        "high": quote.get("high"),
+        "low": quote.get("low"),
+        "close": quote.get("close"),
+        "volume": quote.get("volume"),
+        "source": "live" if not bot.mock else "mock",
+        "timestamp": quote.get("timestamp") or datetime.now().isoformat(),
+    }
+
+
+@app.get("/api/quotes")
+def quotes() -> Dict[str, Any]:
+    """Live quotes for the whole watchlist in one call (for dashboard sidebar)."""
+    if bot is None:
+        raise HTTPException(503, "Bot not initialised")
+    out = {}
+    for sym in bot.analysis.keys() or Watchlist().names():
+        q = bot.connector.get_quotes(sym)
+        if q:
+            out[sym] = {
+                "ltp": q.get("ltp"),
+                "open": q.get("open"),
+                "high": q.get("high"),
+                "low": q.get("low"),
+                "source": "live" if not bot.mock else "mock",
+            }
+    return {"source": "live" if not bot.mock else "mock", "quotes": out}
+
+
+@app.get("/api/bot")
+def bot_status() -> Dict[str, Any]:
+    """Bot mode, connector type, login state, and last analysis snapshot."""
+    if bot is None:
+        raise HTTPException(503, "Bot not initialised")
+    return bot.get_status()
+
+
 # ── dashboard + static ─────────────────────────────────────────────────────
 
 @app.get("/")
@@ -337,10 +389,27 @@ def dashboard():
 
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
+
+    parser = argparse.ArgumentParser(description="PivotBoss AI API server")
+    parser.add_argument("--mock", action="store_true",
+                        help="Force mock data (no Kotak login). Overrides PIVOTBOSS_MOCK.")
+    parser.add_argument("--live", action="store_true",
+                        help="Force live Kotak data with auto-login.")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default="0.0.0.0")
+    args = parser.parse_args()
+
+    # Honour explicit mode flags via env so the imported app picks them up.
+    if args.mock:
+        os.environ["PIVOTBOSS_MOCK"] = "true"
+    elif args.live:
+        os.environ["PIVOTBOSS_MOCK"] = "false"
+
     uvicorn.run(
         "backend.api_server:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
+        host=args.host,
+        port=args.port,
+        reload=False,
     )

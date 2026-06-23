@@ -4,6 +4,9 @@
 # Kotak Neo API (official SDK)
 neo_api_client @ git+https://github.com/Kotak-Neo/Kotak-neo-api-v2.git@v2.0.1
 
+# TOTP generation for non-interactive Kotak login (Phase 2.1+)
+pyotp>=2.9.0
+
 # EOD market data (previous-day OHLC for CPR — no broker login needed)
 yfinance>=0.2.40
 

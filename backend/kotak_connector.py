@@ -11,6 +11,7 @@ API Docs: https://github.com/Kotak-Neo/Kotak-neo-api-v2
 """
 
 import os
+import sys
 import json
 import time
 import logging
@@ -218,6 +219,85 @@ class KotakConnector:
         except Exception as e:
             logger.error(f"MPIN validation error: {e}")
             return False
+
+    # ── NON-INTERACTIVE / AUTO LOGIN ──────────────────────────────────────────
+
+    def totp_seed_login(self, seed: Optional[str] = None, mpin: Optional[str] = None) -> bool:
+        """
+        Fully non-interactive TOTP login using a stored base32 seed.
+
+        If KOTAK_TOTP_SEED is set (the base32 secret from your authenticator's
+        QR code), this generates the current 6-digit TOTP automatically and
+        logs in with no human input — safe for unattended scheduling.
+
+        Falls back gracefully if pyotp is not installed.
+        """
+        try:
+            import pyotp
+        except ImportError:
+            logger.error("pyotp not installed. Run: pip install pyotp")
+            return False
+
+        seed = (seed or os.getenv("KOTAK_TOTP_SEED", "")).strip().replace(" ", "")
+        if not seed:
+            logger.error("KOTAK_TOTP_SEED not set. Cannot auto-generate TOTP.")
+            return False
+
+        totp_code = pyotp.TOTP(seed).now()
+        logger.info("Generated TOTP from seed (valid for ~30s).")
+        if not self.totp_login(totp=totp_code):
+            return False
+        return self.totp_validate(mpin=mpin)
+
+    def login_interactive(self, mpin: Optional[str] = None) -> bool:
+        """
+        Interactive one-time login for environments without a TOTP seed.
+
+        Prompts (via input()) for the current 6-digit TOTP, validates with the
+        stored MPIN, and leaves the session active for the trading day. Use this
+        once at server startup; the session then persists for the scheduler.
+
+        Safe to call when stdin is a TTY. Not for unattended scheduling.
+        """
+        mpin = mpin or self.mpin
+        print("\n── Kotak Neo live login ──")
+        print(f"  Mobile: {self._mask_mobile(self.mobile_number)} | UCC: {self.ucc}")
+        totp = input("  Enter current 6-digit TOTP from your authenticator: ").strip()
+        if not totp:
+            logger.error("No TOTP entered. Aborting live login.")
+            return False
+        if not self.totp_login(totp=totp):
+            return False
+        if not mpin:
+            mpin = input("  Enter 6-digit MPIN (or blank to use KOTAK_MPIN): ").strip()
+        return self.totp_validate(mpin=mpin)
+
+    def ensure_logged_in(self) -> bool:
+        """
+        Best-effort login used by PivotBossBot on startup when mock=False.
+
+        Preference order:
+          1. KOTAK_TOTP_SEED set  → non-interactive seed login (best for schedule)
+          2. stdin is a TTY      → interactive one-time prompt
+          3. otherwise           → log a clear error and return False
+        """
+        if self.is_logged_in:
+            return True
+        if os.getenv("KOTAK_TOTP_SEED", "").strip():
+            logger.info("KOTAK_TOTP_SEED found — attempting non-interactive login.")
+            return self.totp_seed_login()
+        try:
+            if sys.stdin.isatty():
+                logger.info("No TOTP seed. Starting interactive login (one-time).")
+                return self.login_interactive()
+        except Exception:
+            pass
+        logger.error(
+            "Live Kotak login required but no seed set and not a TTY. "
+            "Set KOTAK_TOTP_SEED in config/.env for unattended scheduling, "
+            "or run 'python -m backend.api_server --login'."
+        )
+        return False
 
     @staticmethod
     def _response_has_error(resp) -> bool:
@@ -565,18 +645,31 @@ class MockKotakConnector(KotakConnector):
 
 # ── FACTORY ────────────────────────────────────────────────────────────────────
 
-def get_connector(mock: bool = False) -> KotakConnector:
+def get_connector(mock: bool = False, auto_login: bool = True) -> KotakConnector:
     """
     Returns the appropriate connector.
     Set mock=True to use fake data (no credentials needed).
     Set PAPER_TRADING_MODE=true in .env to prevent real orders even with live connector.
+
+    When mock=False and auto_login=True, attempts a live Kotak login on the
+    returned connector (via KOTAK_TOTP_SEED if set, else interactive prompt).
     """
     if mock or not os.getenv("KOTAK_CONSUMER_KEY"):
         logger.info("Using MOCK connector (no credentials found)")
         conn = MockKotakConnector()
         conn.login()
         return conn
-    return KotakConnector()
+    conn = KotakConnector()
+    if auto_login:
+        if conn.ensure_logged_in():
+            logger.info("Live Kotak connector ready.")
+        else:
+            logger.warning(
+                "Live connector created but login failed — quotes will fail. "
+                "Falling back to mock so the system stays up."
+            )
+            return get_connector(mock=True)
+    return conn
 
 
 if __name__ == "__main__":

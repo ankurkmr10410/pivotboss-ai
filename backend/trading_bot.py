@@ -12,6 +12,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -62,18 +63,24 @@ TRADE_FILE = "data/paper_trades.json"
 
 class PivotBossBot:
 
-    def __init__(self, mock: bool = True):
-        self.mock      = mock
-        self.connector = get_connector(mock=mock)
-        self.store     = MarketStore()
+    def __init__(self, mock: Optional[bool] = None):
+        # Default to live mode when Kotak creds are configured; mock otherwise.
+        # Override explicitly via the `mock` arg or PIVOTBOSS_MOCK=true env var.
+        if mock is None:
+            mock = os.getenv("PIVOTBOSS_MOCK", "").strip().lower() in ("1", "true", "yes")
+        self.mock = mock
+        # Live path auto-logs-in via get_connector(auto_login=True).
+        self.connector = get_connector(mock=mock, auto_login=not mock)
+        self.connector_type = "MOCK" if mock else ("LIVE" if self.connector.is_logged_in else "LIVE-OFFLINE")
+        self.store = MarketStore()
         # Init schema + one-time JSON→SQLite migration, then load trader from DB.
         self._init_store()
-        self.trader    = self._load_trader()
-        self.analysis  = {}   # symbol → {cpr, signal}
+        self.trader = self._load_trader()
+        self.analysis = {}   # symbol → {cpr, signal}
         # EOD provider (Yahoo) for previous-day OHLC. Broker login is NOT required.
         # See ROADMAP.md — CPR setup must not depend on a live session.
         self.eod_provider = YahooProvider.from_watchlist(Watchlist())
-        logger.info(f"PivotBoss Bot initialized | Mock={mock}")
+        logger.info(f"PivotBoss Bot initialized | Connector={self.connector_type}")
 
     def _init_store(self) -> None:
         """Create tables and migrate any legacy JSON portfolio into SQLite."""
@@ -360,7 +367,9 @@ class PivotBossBot:
         stats = self.trader.get_stats()
         return {
             "timestamp": datetime.now().isoformat(),
-            "mode": "mock" if self.mock else "live",
+            "mode": "live" if not self.mock else "mock",
+            "connector": self.connector_type,
+            "logged_in": getattr(self.connector, "is_logged_in", False),
             "paper_trading": True,
             "watchlist": WATCHLIST,
             "analysis": self.analysis,
@@ -379,7 +388,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="PivotBoss AI Trading Bot")
-    parser.add_argument("--live",    action="store_true",  help="Use real Kotak API (default: mock)")
+    parser.add_argument("--mock",    action="store_true",  help="Force mock data (overrides PIVOTBOSS_MOCK)")
+    parser.add_argument("--live",    action="store_true",  help="Force live Kotak data (auto-login)")
     parser.add_argument("--setup",   action="store_true",  help="Run morning CPR setup only")
     parser.add_argument("--scan",    action="store_true",  help="Run market open scan only")
     parser.add_argument("--monitor", action="store_true",  help="Start position monitor loop")
@@ -387,7 +397,10 @@ if __name__ == "__main__":
     parser.add_argument("--all",     action="store_true",  help="Run full cycle (setup + scan + monitor)")
     args = parser.parse_args()
 
-    bot = PivotBossBot(mock=not args.live)
+    if args.mock and args.live:
+        parser.error("--mock and --live are mutually exclusive.")
+    mock = True if args.mock else (False if args.live else None)
+    bot = PivotBossBot(mock=mock)
 
     if args.summary:
         bot.print_summary()
