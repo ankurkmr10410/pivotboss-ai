@@ -52,12 +52,15 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from alerts import get_alert_provider
+from api_routes import router as v1_router
+from api_schemas import PortfolioResponse, StatusCounts, StatusResponse
+from auth import get_api_key
 from config_loader import Watchlist
 from data_provider import Candle
 from db import MarketStore
@@ -110,6 +113,27 @@ app = FastAPI(
     version="0.5.0",
     lifespan=_lifespan,
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": "HTTPException", "detail": detail},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled exception while serving %s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "InternalServerError", "detail": "Internal server error"},
+    )
+
+
+app.include_router(v1_router)
 
 # Allow the dashboard (opened as file://) and any local dev origin to call us.
 app.add_middleware(

@@ -7,6 +7,7 @@ fully offline and isolated.
 
 from __future__ import annotations
 
+import os
 import sys
 import json
 from pathlib import Path
@@ -89,6 +90,17 @@ def test_status_returns_ok():
     assert data["status"] == "ok"
     assert "counts" in data
     assert data["counts"]["candles"] > 0
+    assert "NIFTY" in data["watchlist"]
+
+
+def test_versioned_status_endpoint_uses_typed_payload():
+    api_key = os.getenv("PIVOTBOSS_API_KEY")
+    headers = {"X-API-Key": api_key} if api_key else {}
+    r = client.get("/api/v1/status", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "ok"
+    assert isinstance(data["counts"], dict)
     assert "NIFTY" in data["watchlist"]
 
 
