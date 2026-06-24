@@ -135,7 +135,14 @@ class KotakConnector:
         return mobile[-4:].rjust(len(mobile), "*") if mobile else ""
 
     def totp_login(self, ucc: Optional[str] = None, totp: Optional[str] = None) -> bool:
-        """Step 1 of Kotak Neo v2 TOTP flow: create the view token."""
+        """Step 1 of Kotak Neo v2 TOTP flow: create the view token.
+
+        Kotak's server rejects the mobileNumber field entirely (400 error).
+        We bypass the SDK and call the REST endpoint directly without it.
+        URL: https://mis.kotaksecurities.com/login/1.0/tradeApiLogin
+        """
+        import requests as _requests
+
         try:
             self._init_client()
             ucc = (ucc or self.ucc).strip()
@@ -144,8 +151,6 @@ class KotakConnector:
             missing = []
             if not self.consumer_key:
                 missing.append("KOTAK_CONSUMER_KEY")
-            if not self.mobile_number:
-                missing.append("KOTAK_MOBILE")
             if not ucc:
                 missing.append("KOTAK_UCC")
             if not totp:
@@ -153,42 +158,45 @@ class KotakConnector:
             if missing:
                 logger.error("Missing Kotak TOTP login value(s): %s", ", ".join(missing))
                 return False
-            if not (self.mobile_number.isdigit() and len(self.mobile_number) in (10, 12)):
-                logger.error(
-                    "Invalid KOTAK_MOBILE value. Mobile number must be 10 digits or 91-prefixed 12 digits."
-                )
-                return False
 
-            masked_mobile = self._mask_mobile(self.mobile_number)
-            logger.info("Attempting Kotak TOTP login with mobile: %s", masked_mobile)
-
-            resp = self.client.totp_login(
-                mobile_number=self.mobile_number,
-                ucc=ucc,
-                totp=totp,
+            logger.info("Attempting Kotak TOTP login | UCC: %s", ucc)
+            logger.info(
+                "Credentials check | consumer_key=%s | neo_fin_key=%s | mobile=%s",
+                "SET" if self.consumer_key else "MISSING",
+                "SET" if self.neo_fin_key else "MISSING",
+                self._mask_mobile(self.mobile_number) if self.mobile_number else "MISSING",
             )
-            if self._response_has_error(resp):
-                # Retry with country prefix if the first attempt fails on 10-digit numbers.
-                if len(self.mobile_number) == 10:
-                    alt_mobile = "91" + self.mobile_number
-                    logger.warning(
-                        "TOTP first attempt failed. Retrying with country prefix: 91%s",
-                        self._mask_mobile(self.mobile_number)
-                    )
-                    resp2 = self.client.totp_login(
-                        mobile_number=alt_mobile,
-                        ucc=ucc,
-                        totp=totp,
-                    )
-                    if not self._response_has_error(resp2):
-                        self.client.api_client.configuration.view_token = resp2["data"]["token"]
-                        self.client.api_client.configuration.sid = resp2["data"]["sid"]
-                        logger.info("Kotak Neo TOTP login accepted with 91-prefixed mobile.")
-                        return True
-                    logger.error("TOTP login retry failed: %s", self._safe_response(resp2))
-                else:
-                    logger.error("TOTP login failed: %s", self._safe_response(resp))
+
+            # Call the API directly with all required fields.
+            url = "https://mis.kotaksecurities.com/login/1.0/tradeApiLogin"
+            fin_key = self.neo_fin_key or "neotradeapi"
+            headers = {
+                "Authorization": self.consumer_key,
+                "Content-Type": "application/json",
+                "neo-fin-key": fin_key,
+            }
+            # Send mobile as 10-digit (strip country prefix if present)
+            mobile = self.mobile_number[-10:] if len(self.mobile_number) > 10 else self.mobile_number
+            body = {"mobileNumber": mobile, "ucc": ucc, "totp": totp}
+
+            logger.info("Request URL: %s", url)
+            logger.info("Request headers (masked): Authorization=%s... neo-fin-key=%s",
+                        self.consumer_key[:8] if self.consumer_key else "NONE",
+                        fin_key[:8])
+            logger.info("Request body: %s", {**body, "totp": "******"})
+            resp = _requests.post(url, json=body, headers=headers, timeout=15)
+            logger.info("Response status: %s | body: %s", resp.status_code, resp.text[:300])
+            data = resp.json()
+
+            if not (200 <= resp.status_code <= 299) or data.get("error"):
+                logger.error("TOTP login failed: %s", self._safe_response(data))
                 return False
+
+            # Store tokens on the SDK client so totp_validate works normally.
+            token = data.get("data", {}).get("token", "")
+            sid   = data.get("data", {}).get("sid", "")
+            self.client.api_client.configuration.view_token = token
+            self.client.api_client.configuration.sid = sid
 
             logger.info("Kotak Neo TOTP login accepted. Validate MPIN next.")
             return True
@@ -579,6 +587,7 @@ class MockKotakConnector(KotakConnector):
         "RELIANCE":  {"ltp": 2968,  "open": 2960,  "high": 2980,  "low": 2920,  "close": 2955},
         "HDFCBANK":  {"ltp": 1745,  "open": 1738,  "high": 1760,  "low": 1730,  "close": 1742},
         "TCS":       {"ltp": 4125,  "open": 4108,  "high": 4150,  "low": 4090,  "close": 4118},
+        "INFY":      {"ltp": 1890,  "open": 1882,  "high": 1905,  "low": 1870,  "close": 1885},
     }
 
     def login(self) -> bool:

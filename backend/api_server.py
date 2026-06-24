@@ -51,6 +51,7 @@ _BACKEND = Path(__file__).resolve().parent
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -77,10 +78,37 @@ _DASHBOARD = _REPO_ROOT / "frontend" / "dashboard.html"
 
 # ── app + store ────────────────────────────────────────────────────────────
 
+store = MarketStore()
+
+# Bot + scheduler — initialised on startup so they share the store singleton.
+bot: PivotBossBot | None = None
+scheduler: TradingScheduler | None = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Lifespan handler — replaces deprecated on_event startup/shutdown."""
+    global bot, scheduler
+
+    logger.info("API store ready at %s", store.db_path)
+    bot = await PivotBossBot.create_async()
+    scheduler = create_scheduler(bot=bot, store=store)
+    scheduler.start()
+    app.state.bot = bot
+    app.state.scheduler = scheduler
+
+    yield  # server is running
+
+    if scheduler is not None:
+        scheduler.stop()
+        logger.info("Scheduler shut down.")
+
+
 app = FastAPI(
     title="PivotBoss AI",
     description="CPR-based trading system API (paper trading + analytics)",
     version="0.5.0",
+    lifespan=_lifespan,
 )
 
 # Allow the dashboard (opened as file://) and any local dev origin to call us.
@@ -90,36 +118,6 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
-
-store = MarketStore()
-
-# Bot + scheduler — initialised on startup so they share the store singleton.
-bot: PivotBossBot | None = None
-scheduler: TradingScheduler | None = None
-
-
-@app.on_event("startup")
-async def _startup() -> None:
-    """Ensure the schema exists, then boot the bot + scheduler."""
-    await store.init()
-    logger.info("API store ready at %s", store.db_path)
-
-    global bot, scheduler
-    bot = PivotBossBot()
-    scheduler = create_scheduler(bot=bot, store=store)
-    scheduler.start()
-
-    # Expose on app.state so future endpoints / middleware can reach them.
-    app.state.bot = bot
-    app.state.scheduler = scheduler
-
-
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    """Gracefully stop the scheduler on process exit."""
-    if scheduler is not None:
-        scheduler.stop()
-        logger.info("Scheduler shut down.")
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -397,6 +395,8 @@ if __name__ == "__main__":
                         help="Force mock data (no Kotak login). Overrides PIVOTBOSS_MOCK.")
     parser.add_argument("--live", action="store_true",
                         help="Force live Kotak data with auto-login.")
+    parser.add_argument("--login", action="store_true",
+                        help="Interactive TOTP login before starting the server (use once per day).")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="0.0.0.0")
     args = parser.parse_args()
@@ -404,7 +404,19 @@ if __name__ == "__main__":
     # Honour explicit mode flags via env so the imported app picks them up.
     if args.mock:
         os.environ["PIVOTBOSS_MOCK"] = "true"
-    elif args.live:
+    elif args.live or args.login:
+        os.environ["PIVOTBOSS_MOCK"] = "false"
+
+    # --login: do interactive TOTP now (TTY), store session, then start server.
+    # The session lives in the KotakConnector singleton for the process lifetime.
+    if args.login:
+        from kotak_connector import get_connector as _gc
+        _conn = _gc(mock=False, auto_login=False)
+        if not _conn.login_interactive():
+            print("\nLogin failed. Fix credentials in config/.env and retry.")
+            raise SystemExit(1)
+        print("\nKotak login successful -- starting API server...")
+        # Patch env so the bot inside uvicorn reuses the already-logged-in connector.
         os.environ["PIVOTBOSS_MOCK"] = "false"
 
     uvicorn.run(

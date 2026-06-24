@@ -89,12 +89,44 @@ class PivotBossBot:
             logger.info("Migrating legacy %s into SQLite...", TRADE_FILE)
             asyncio.run(self.store.migrate_from_json(Path(TRADE_FILE)))
 
+    async def _init_store_async(self) -> None:
+        """Async version of _init_store -- used when called from an async context (FastAPI)."""
+        await self.store.init()
+        if await self.store.needs_migration(Path(TRADE_FILE)):
+            logger.info("Migrating legacy %s into SQLite...", TRADE_FILE)
+            await self.store.migrate_from_json(Path(TRADE_FILE))
+
     def _load_trader(self) -> PaperTrader:
         try:
             return asyncio.run(PaperTrader.load_from_store(self.store))
         except Exception as e:
             logger.warning(f"Store load failed ({e}); starting fresh trader.")
             return PaperTrader(starting_capital=500000)
+
+    async def _load_trader_async(self) -> PaperTrader:
+        """Async version of _load_trader -- used when called from an async context (FastAPI)."""
+        try:
+            return await PaperTrader.load_from_store(self.store)
+        except Exception as e:
+            logger.warning(f"Store load failed ({e}); starting fresh trader.")
+            return PaperTrader(starting_capital=500000)
+
+    @classmethod
+    async def create_async(cls, mock=None) -> "PivotBossBot":
+        """Async factory -- use this from FastAPI startup instead of PivotBossBot()."""
+        self = cls.__new__(cls)
+        if mock is None:
+            mock = os.getenv("PIVOTBOSS_MOCK", "").strip().lower() in ("1", "true", "yes")
+        self.mock = mock
+        self.connector = get_connector(mock=mock, auto_login=not mock)
+        self.connector_type = "MOCK" if mock else ("LIVE" if self.connector.is_logged_in else "LIVE-OFFLINE")
+        self.store = MarketStore()
+        await self._init_store_async()
+        self.trader = await self._load_trader_async()
+        self.analysis = {}
+        self.eod_provider = YahooProvider.from_watchlist(Watchlist())
+        logger.info(f"PivotBoss Bot initialized | Connector={self.connector_type}")
+        return self
 
     # ── STEP 1: MORNING SETUP (run at 9:00 AM) ─────────────────────────────
 
@@ -154,6 +186,19 @@ class PivotBossBot:
                 prev   = candles[-1]   # yesterday
                 prev2  = candles[-2]   # day before yesterday
 
+                # Look up yesterday's stored CPR for Virgin CPR detection.
+                # Virgin CPR = price never entered yesterday's CPR zone.
+                prev_cpr_tc = None
+                prev_cpr_bc = None
+                try:
+                    yesterday = prev["date"]
+                    prev_cpr = asyncio.run(self.store.get_cpr(symbol, yesterday))
+                    if prev_cpr:
+                        prev_cpr_tc = prev_cpr.tc
+                        prev_cpr_bc = prev_cpr.bc
+                except Exception as e:
+                    logger.debug(f"  {symbol}: no stored CPR for virgin check ({e})")
+
                 # Build CPR from yesterday's data
                 cpr = calculate_cpr(
                     symbol=symbol,
@@ -163,6 +208,8 @@ class PivotBossBot:
                     close=prev["close"],
                     prev_high=prev2["high"] if prev2 else None,
                     prev_low=prev2["low"]   if prev2 else None,
+                    prev_cpr_high=prev_cpr_tc,
+                    prev_cpr_low=prev_cpr_bc,
                 )
 
                 self.analysis[symbol] = {
@@ -230,8 +277,8 @@ class PivotBossBot:
 
                 signals_generated.append(signal)
 
-                # Auto paper trade if strength ≥ 7
-                if signal.strength >= 7 and sig_val != "NEUTRAL":
+                # Auto paper trade if strength ≥ 6
+                if signal.strength >= 6 and sig_val != "NEUTRAL":
                     self._auto_paper_trade(signal, quote)
 
             except Exception as e:
