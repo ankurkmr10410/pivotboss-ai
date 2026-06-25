@@ -122,7 +122,7 @@ class KotakConnector:
             resp = self.client.session_2fa(OTP=otp)
             if resp and resp.get("data"):
                 self.is_logged_in = True
-                logger.info("✅ Kotak Neo login successful!")
+                logger.info("Kotak Neo login successful!")
                 return True
             else:
                 logger.error(f"OTP verification failed: {resp}")
@@ -135,22 +135,20 @@ class KotakConnector:
         return mobile[-4:].rjust(len(mobile), "*") if mobile else ""
 
     def totp_login(self, ucc: Optional[str] = None, totp: Optional[str] = None) -> bool:
-        """Step 1 of Kotak Neo v2 TOTP flow: create the view token.
+        """Step 1 of Kotak Neo v2 TOTP flow using the SDK directly.
 
-        Kotak's server rejects the mobileNumber field entirely (400 error).
-        We bypass the SDK and call the REST endpoint directly without it.
-        URL: https://mis.kotaksecurities.com/login/1.0/tradeApiLogin
+        Mobile must be in +91XXXXXXXXXX format.
+        neo_fin_key defaults to "neotradeapi" if not set (SDK default).
+        consumer_key = the API Access Token from the Kotak Neo Trade API portal.
         """
-        import requests as _requests
-
         try:
             self._init_client()
-            ucc = (ucc or self.ucc).strip()
+            ucc  = (ucc or self.ucc).strip()
             totp = (totp or "").strip()
 
             missing = []
             if not self.consumer_key:
-                missing.append("KOTAK_CONSUMER_KEY")
+                missing.append("KOTAK_CONSUMER_KEY (API Access Token from Trade API portal)")
             if not ucc:
                 missing.append("KOTAK_UCC")
             if not totp:
@@ -159,44 +157,33 @@ class KotakConnector:
                 logger.error("Missing Kotak TOTP login value(s): %s", ", ".join(missing))
                 return False
 
-            logger.info("Attempting Kotak TOTP login | UCC: %s", ucc)
+            # Mobile must be in +91XXXXXXXXXX format — Kotak server requires this.
+            mobile = self.mobile_number.strip()
+            if mobile.startswith("+"):
+                pass  # already correct
+            elif mobile.startswith("91") and len(mobile) == 12:
+                mobile = "+" + mobile
+            elif len(mobile) == 10:
+                mobile = "+91" + mobile
+            else:
+                mobile = "+91" + mobile[-10:]
+
+            logger.info("Attempting Kotak TOTP login | UCC: %s | mobile: %s", ucc, self._mask_mobile(mobile))
             logger.info(
-                "Credentials check | consumer_key=%s | neo_fin_key=%s | mobile=%s",
+                "Credentials | consumer_key=%s | neo_fin_key=%s",
                 "SET" if self.consumer_key else "MISSING",
-                "SET" if self.neo_fin_key else "MISSING",
-                self._mask_mobile(self.mobile_number) if self.mobile_number else "MISSING",
+                "SET" if self.neo_fin_key else "using default",
             )
 
-            # Call the API directly with all required fields.
-            url = "https://mis.kotaksecurities.com/login/1.0/tradeApiLogin"
-            fin_key = self.neo_fin_key or "neotradeapi"
-            headers = {
-                "Authorization": self.consumer_key,
-                "Content-Type": "application/json",
-                "neo-fin-key": fin_key,
-            }
-            # Send mobile as 10-digit (strip country prefix if present)
-            mobile = self.mobile_number[-10:] if len(self.mobile_number) > 10 else self.mobile_number
-            body = {"mobileNumber": mobile, "ucc": ucc, "totp": totp}
+            resp = self.client.totp_login(
+                mobile_number=mobile,
+                ucc=ucc,
+                totp=totp,
+            )
 
-            logger.info("Request URL: %s", url)
-            logger.info("Request headers (masked): Authorization=%s... neo-fin-key=%s",
-                        self.consumer_key[:8] if self.consumer_key else "NONE",
-                        fin_key[:8])
-            logger.info("Request body: %s", {**body, "totp": "******"})
-            resp = _requests.post(url, json=body, headers=headers, timeout=15)
-            logger.info("Response status: %s | body: %s", resp.status_code, resp.text[:300])
-            data = resp.json()
-
-            if not (200 <= resp.status_code <= 299) or data.get("error"):
-                logger.error("TOTP login failed: %s", self._safe_response(data))
+            if self._response_has_error(resp):
+                logger.error("TOTP login failed: %s", self._safe_response(resp))
                 return False
-
-            # Store tokens on the SDK client so totp_validate works normally.
-            token = data.get("data", {}).get("token", "")
-            sid   = data.get("data", {}).get("sid", "")
-            self.client.api_client.configuration.view_token = token
-            self.client.api_client.configuration.sid = sid
 
             logger.info("Kotak Neo TOTP login accepted. Validate MPIN next.")
             return True
@@ -268,7 +255,7 @@ class KotakConnector:
         Safe to call when stdin is a TTY. Not for unattended scheduling.
         """
         mpin = mpin or self.mpin
-        print("\n── Kotak Neo live login ──")
+        print("\n-- Kotak Neo live login --")
         print(f"  Mobile: {self._mask_mobile(self.mobile_number)} | UCC: {self.ucc}")
         totp = input("  Enter current 6-digit TOTP from your authenticator: ").strip()
         if not totp:
@@ -431,7 +418,7 @@ class KotakConnector:
         logger.warning(f"WebSocket closed: {message}")
 
     def _on_open(self, message):
-        logger.info("WebSocket connected ✅")
+        logger.info("WebSocket connected OK")
 
     def start_live_feed(self, symbols: list[str]):
         """Start WebSocket live feed for given symbols"""
@@ -527,7 +514,7 @@ class KotakConnector:
 
             if resp and resp.get("data", {}).get("nOrdNo"):
                 order_id = resp["data"]["nOrdNo"]
-                logger.info(f"✅ Order placed: {order_id} | {action} {quantity} {symbol}")
+                logger.info(f"Order placed: {order_id} | {action} {quantity} {symbol}")
                 return {"order_id": order_id, "status": "placed", "symbol": symbol}
             else:
                 logger.error(f"Order failed: {resp}")
@@ -592,7 +579,7 @@ class MockKotakConnector(KotakConnector):
 
     def login(self) -> bool:
         self.is_logged_in = True
-        logger.info("🎭 Mock login successful (no real API call)")
+        logger.info("Mock login successful (no real API call)")
         return True
 
     def verify_otp(self, otp: str) -> bool:
@@ -638,7 +625,7 @@ class MockKotakConnector(KotakConnector):
         return candles
 
     def place_order(self, symbol, action, quantity, **kwargs) -> dict:
-        logger.info(f"🎭 Mock order: {action} {quantity} {symbol}")
+        logger.info(f" Mock order: {action} {quantity} {symbol}")
         return {
             "order_id": f"MOCK_{int(time.time())}",
             "status": "mock_executed",
@@ -654,20 +641,38 @@ class MockKotakConnector(KotakConnector):
 
 # ── FACTORY ────────────────────────────────────────────────────────────────────
 
+# Module-level singleton — ensures --login session is reused by the bot.
+_connector_singleton: Optional[KotakConnector] = None
+
+
+def set_connector(conn: KotakConnector) -> None:
+    """Store a pre-logged-in connector so the bot reuses it (used by --login flow)."""
+    global _connector_singleton
+    _connector_singleton = conn
+    logger.info("Connector singleton set: %s", type(conn).__name__)
+
+
 def get_connector(mock: bool = False, auto_login: bool = True) -> KotakConnector:
     """
     Returns the appropriate connector.
-    Set mock=True to use fake data (no credentials needed).
-    Set PAPER_TRADING_MODE=true in .env to prevent real orders even with live connector.
-
-    When mock=False and auto_login=True, attempts a live Kotak login on the
-    returned connector (via KOTAK_TOTP_SEED if set, else interactive prompt).
+    - If a singleton was stored via set_connector() (e.g. after --login), return it.
+    - Set mock=True to use fake data (no credentials needed).
+    - Set PAPER_TRADING_MODE=true in .env to prevent real orders even with live connector.
+    - When mock=False and auto_login=True, attempts live Kotak login.
     """
+    global _connector_singleton
+
+    # Reuse pre-logged-in connector from --login flow.
+    if _connector_singleton is not None:
+        logger.info("Reusing pre-logged-in connector singleton: %s", type(_connector_singleton).__name__)
+        return _connector_singleton
+
     if mock or not os.getenv("KOTAK_CONSUMER_KEY"):
         logger.info("Using MOCK connector (no credentials found)")
         conn = MockKotakConnector()
         conn.login()
         return conn
+
     conn = KotakConnector()
     if auto_login:
         if conn.ensure_logged_in():

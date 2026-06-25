@@ -40,16 +40,14 @@ import asyncio
 import logging
 import os
 import sys
+
+# Ensure backend/ is on sys.path regardless of invocation method.
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-# Ensure backend/ is importable when uvicorn imports this as
-# `backend.api_server:app` (in which case the parent dir, not backend/,
-# is on sys.path).
-_BACKEND = Path(__file__).resolve().parent
-if str(_BACKEND) not in sys.path:
-    sys.path.insert(0, str(_BACKEND))
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -434,14 +432,15 @@ if __name__ == "__main__":
     # --login: do interactive TOTP now (TTY), store session, then start server.
     # The session lives in the KotakConnector singleton for the process lifetime.
     if args.login:
-        from kotak_connector import get_connector as _gc
+        from kotak_connector import get_connector as _gc, set_connector as _sc
         _conn = _gc(mock=False, auto_login=False)
         if not _conn.login_interactive():
             print("\nLogin failed. Fix credentials in config/.env and retry.")
             raise SystemExit(1)
-        print("\nKotak login successful -- starting API server...")
-        # Patch env so the bot inside uvicorn reuses the already-logged-in connector.
+        # Store the logged-in connector as singleton so the bot reuses this session.
+        _sc(_conn)
         os.environ["PIVOTBOSS_MOCK"] = "false"
+        print("\nKotak login successful -- starting API server...")
 
     uvicorn.run(
         "backend.api_server:app",
