@@ -20,7 +20,7 @@ symbols:
     segment: index
     yahoo_ticker: "^NSEI"
     kotak:
-      exchange: nse_fo
+      exchange: nse_idx
       token: "26000"
     lot_size: 75        # verify on nseindia.com
 
@@ -28,7 +28,7 @@ symbols:
     segment: index
     yahoo_ticker: "^NSEBANK"
     kotak:
-      exchange: nse_fo
+      exchange: nse_idx
       token: "26009"
     lot_size: 35        # verify on nseindia.com
 
