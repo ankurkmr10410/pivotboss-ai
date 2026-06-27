@@ -405,6 +405,11 @@ async def run_backtest(
     symbol: str = "NIFTY",
     years: float = 2.0,
     min_strength: int = 6,
+    ema_filter: bool = False,
+    ema_period: int = 20,
+    volume_filter: bool = False,
+    volume_mult: float = 1.5,
+    breakout_filter: bool = False,
 ):
     """Run CPR backtest on historical Yahoo data and return results."""
     import asyncio
@@ -435,8 +440,15 @@ async def run_backtest(
     if len(candle_dicts) < 3:
         raise HTTPException(503, f"Not enough historical data for {symbol} — Yahoo may be rate-limiting.")
 
-    pess = CPRBacktester(min_strength=min_strength, exit_model="pessimistic").run(symbol, candle_dicts)
-    opt  = CPRBacktester(min_strength=min_strength, exit_model="optimistic").run(symbol, candle_dicts)
+    _filters = dict(
+        use_ema_filter=ema_filter,
+        ema_period=ema_period,
+        use_volume_filter=volume_filter,
+        volume_multiplier=volume_mult,
+        use_breakout_filter=breakout_filter,
+    )
+    pess = CPRBacktester(min_strength=min_strength, exit_model="pessimistic", **_filters).run(symbol, candle_dicts)
+    opt  = CPRBacktester(min_strength=min_strength, exit_model="optimistic",  **_filters).run(symbol, candle_dicts)
 
     return {
         "symbol": symbol,

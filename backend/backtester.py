@@ -140,18 +140,62 @@ class CPRBacktester:
         min_strength: int = 6,
         exit_model: str = "pessimistic",
         include_neutral: bool = False,
+        use_ema_filter: bool = False,
+        ema_period: int = 20,
+        use_volume_filter: bool = False,
+        volume_multiplier: float = 1.5,
+        use_breakout_filter: bool = False,
     ):
         """
         Args:
-            min_strength:     minimum signal strength (1-10) to take a trade.
-            exit_model:       "pessimistic" (SL first) or "optimistic" (targets first).
-            include_neutral:  if False, NEUTRAL signals never open a position.
+            min_strength:       minimum signal strength (1-10) to take a trade.
+            exit_model:         "pessimistic" (SL first) or "optimistic" (targets first).
+            include_neutral:    if False, NEUTRAL signals never open a position.
+            use_ema_filter:     only BUY above ema_period EMA, only SELL below it.
+            ema_period:         EMA lookback period (default 20).
+            use_volume_filter:  require volume > volume_multiplier x 20-day avg.
+            volume_multiplier:  how many times avg volume is required (default 1.5).
+            use_breakout_filter: require today's open to be clearly beyond TC/BC
+                                 (open > TC for BUY, open < BC for SELL).
+                                 This simulates waiting for a confirmed breakout.
         """
         if exit_model not in ("pessimistic", "optimistic"):
             raise ValueError("exit_model must be 'pessimistic' or 'optimistic'")
         self.min_strength = min_strength
         self.exit_model = exit_model
         self.include_neutral = include_neutral
+        self.use_ema_filter = use_ema_filter
+        self.ema_period = ema_period
+        self.use_volume_filter = use_volume_filter
+        self.volume_multiplier = volume_multiplier
+        self.use_breakout_filter = use_breakout_filter
+
+    # ── FILTER HELPERS ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _ema(values: List[float], period: int) -> List[float]:
+        """Exponential moving average. Returns same-length list (first period-1 values are 0.0)."""
+        result = []
+        k = 2.0 / (period + 1)
+        ema = None
+        for v in values:
+            if ema is None:
+                ema = v
+            else:
+                ema = v * k + ema * (1 - k)
+            result.append(ema)
+        return result
+
+    @staticmethod
+    def _rolling_avg(values: List[float], period: int) -> List[float]:
+        """Simple rolling average. Returns same-length list."""
+        result = []
+        for i, v in enumerate(values):
+            if i < period - 1:
+                result.append(sum(values[:i+1]) / (i+1))
+            else:
+                result.append(sum(values[i-period+1:i+1]) / period)
+        return result
 
     def run(
         self,
@@ -179,6 +223,12 @@ class CPRBacktester:
             exit_model=self.exit_model,
         )
 
+        # Pre-compute EMA and volume series if filters are enabled
+        closes  = [c["close"] for c in candles]
+        volumes = [c.get("volume", 0) for c in candles]
+        emas     = self._ema(closes, self.ema_period)
+        vol_avgs = self._rolling_avg(volumes, 20)
+
         for i in range(2, len(candles)):
             today = candles[i]
             prev = candles[i - 1]
@@ -205,6 +255,31 @@ class CPRBacktester:
                 continue
             if signal.strength < self.min_strength:
                 continue
+
+            # ── OPTIONAL FILTERS ─────────────────────────────────────────────
+            is_buy  = "BUY"  in sig_val
+            is_sell = "SELL" in sig_val
+
+            # Filter 1: EMA trend — only trade in direction of trend
+            if self.use_ema_filter and (is_buy or is_sell):
+                ema_val = emas[i]
+                if is_buy  and today["open"] < ema_val:
+                    continue  # price below EMA, skip bullish signal
+                if is_sell and today["open"] > ema_val:
+                    continue  # price above EMA, skip bearish signal
+
+            # Filter 2: Volume confirmation — require above-average volume
+            if self.use_volume_filter and (is_buy or is_sell):
+                vol_avg = vol_avgs[i]
+                if vol_avg > 0 and today.get("volume", 0) < vol_avg * self.volume_multiplier:
+                    continue  # weak volume, skip trade
+
+            # Filter 3: Breakout confirmation — open must clear TC/BC cleanly
+            if self.use_breakout_filter:
+                if is_buy  and today["open"] <= cpr.tc:
+                    continue  # no confirmed breakout above TC
+                if is_sell and today["open"] >= cpr.bc:
+                    continue  # no confirmed breakout below BC
 
             trade = self._simulate_trade(today, signal, sig_val, cpr)
             if trade:

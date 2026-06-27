@@ -166,6 +166,24 @@ tr:hover td{background:rgba(255,255,255,.015);}
       </div>
       <button class="run-btn" id="run-btn" onclick="runBacktest()">RUN BACKTEST →</button>
     </div>
+    <div style="display:flex;gap:20px;margin-top:14px;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--mu);letter-spacing:1px;">
+        <input type="checkbox" id="ema-filter" style="accent-color:var(--bl);width:14px;height:14px;">
+        EMA TREND FILTER (20)
+      </label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--mu);letter-spacing:1px;">
+        <input type="checkbox" id="volume-filter" style="accent-color:var(--bl);width:14px;height:14px;">
+        VOLUME FILTER (1.5x avg)
+      </label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--mu);letter-spacing:1px;">
+        <input type="checkbox" id="breakout-filter" style="accent-color:var(--bl);width:14px;height:14px;">
+        BREAKOUT CONFIRMATION
+      </label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-family:var(--mono);font-size:10px;color:var(--mu);letter-spacing:1px;">
+        <input type="checkbox" id="all-filters" style="accent-color:var(--pu);width:14px;height:14px;" onchange="toggleAll(this.checked)">
+        ALL FILTERS (recommended)
+      </label>
+    </div>
   </div>
 
   <!-- STATUS -->
@@ -268,7 +286,10 @@ async function runBacktest() {
   document.getElementById('results').style.display = 'none';
 
   try {
-    const url = `${API}/api/backtest?symbol=${sym}&years=${years}&min_strength=${strength}`;
+    const ema      = document.getElementById('ema-filter').checked;
+    const vol      = document.getElementById('volume-filter').checked;
+    const breakout = document.getElementById('breakout-filter').checked;
+    const url = `${API}/api/backtest?symbol=${sym}&years=${years}&min_strength=${strength}&ema_filter=${ema}&volume_filter=${vol}&breakout_filter=${breakout}`;
     const r = await fetch(url);
     if (!r.ok) {
       const err = await r.json();
@@ -433,6 +454,11 @@ function renderEquity(trades) {
     <text x="${W-pad}" y="${pad-4}" text-anchor="end" font-family="IBM Plex Mono" font-size="9" fill="${col}">${last >= 0 ? '+' : ''}${last.toFixed(0)} pts</text>
     <text x="${pad}" y="${H-4}" font-family="IBM Plex Mono" font-size="9" fill="rgba(255,255,255,.2)">${trades[0]?.entry_date||''}</text>
     <text x="${W-pad}" y="${H-4}" text-anchor="end" font-family="IBM Plex Mono" font-size="9" fill="rgba(255,255,255,.2)">${trades[trades.length-1]?.entry_date||''}</text>`;
+}
+function toggleAll(on) {
+  ['ema-filter','volume-filter','breakout-filter'].forEach(id => {
+    document.getElementById(id).checked = on;
+  });
 }
 </script>
 </body>

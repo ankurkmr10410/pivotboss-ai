@@ -82,7 +82,12 @@ def main():
     p.add_argument("--symbol", help="Single watchlist symbol (e.g. NIFTY)")
     p.add_argument("--all", action="store_true", help="Backtest every symbol in the watchlist")
     p.add_argument("--years", type=float, default=2.0, help="Years of history (default 2)")
-    p.add_argument("--min-strength", type=int, default=6, help="Min signal strength to take a trade (1-10)")
+    p.add_argument("--min-strength",    type=int,   default=6,   help="Min signal strength to take a trade (1-10)")
+    p.add_argument("--ema-filter",      action="store_true",      help="Only trade in EMA trend direction")
+    p.add_argument("--ema-period",      type=int,   default=20,   help="EMA period (default 20)")
+    p.add_argument("--volume-filter",   action="store_true",      help="Require volume > 1.5x avg")
+    p.add_argument("--volume-mult",     type=float, default=1.5,  help="Volume multiplier threshold")
+    p.add_argument("--breakout-filter", action="store_true",      help="Require open beyond TC/BC")
     p.add_argument("--model", choices=["pessimistic", "optimistic"], default="pessimistic",
                    help="Exit model. Backtester reports BOTH; this picks the summary's headline.")
     p.add_argument("--notify", choices=["console", "whatsapp"], default="console",
@@ -156,8 +161,15 @@ def main():
             continue
 
         # Run BOTH exit models so we bracket the true expectancy.
-        pess = CPRBacktester(min_strength=args.min_strength, exit_model="pessimistic").run(sym, candle_dicts)
-        opt = CPRBacktester(min_strength=args.min_strength, exit_model="optimistic").run(sym, candle_dicts)
+        _f = dict(
+            use_ema_filter=args.ema_filter,
+            ema_period=args.ema_period,
+            use_volume_filter=args.volume_filter,
+            volume_multiplier=args.volume_mult,
+            use_breakout_filter=args.breakout_filter,
+        )
+        pess = CPRBacktester(min_strength=args.min_strength, exit_model="pessimistic", **_f).run(sym, candle_dicts)
+        opt  = CPRBacktester(min_strength=args.min_strength, exit_model="optimistic",  **_f).run(sym, candle_dicts)
 
         # `result` for breakdowns follows the chosen headline model.
         result = pess if args.model == "pessimistic" else opt
