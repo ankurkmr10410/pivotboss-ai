@@ -77,7 +77,7 @@ class BacktestResult:
 
         pnls = [t.pnl_points for t in self.trades]
         wins = [p for p in pnls if p > 0]
-        losses = [p for p in pnls if p <= 0]
+        losses = [p for p in pnls if p < 0]   # BE (p==0) is not a loss
         gross_profit = sum(wins)
         gross_loss = abs(sum(losses))
         net = sum(pnls)
@@ -159,8 +159,8 @@ class CPRBacktester:
                                  (open > TC for BUY, open < BC for SELL).
                                  This simulates waiting for a confirmed breakout.
         """
-        if exit_model not in ("pessimistic", "optimistic"):
-            raise ValueError("exit_model must be 'pessimistic' or 'optimistic'")
+        if exit_model not in ("pessimistic", "optimistic", "trail"):
+            raise ValueError("exit_model must be 'pessimistic', 'optimistic', or 'trail'")
         self.min_strength = min_strength
         self.exit_model = exit_model
         self.include_neutral = include_neutral
@@ -323,6 +323,7 @@ class CPRBacktester:
             t3_hit=t3_hit,
             sl_first=sl_first,
             sl=sl, t1=t1, t2=t2, t3=t3,
+            entry=entry,
         )
 
         # If nothing was touched intraday → exit at close (EOD).
@@ -356,6 +357,7 @@ class CPRBacktester:
         self, direction: str, sl_hit: bool, t1_hit: bool, t2_hit: bool, t3_hit: bool,
         sl_first: bool,
         sl: float, t1: float, t2: float, t3: float,
+        entry: float = 0.0,
     ) -> (float, Optional[str]):
         """
         Decide which level to credit the exit to, given the day's range.
@@ -375,6 +377,23 @@ class CPRBacktester:
             ]:
                 if touched:
                     return level, name
+
+        elif self.exit_model == "trail":
+            # Trail model: if T1 is hit, stop moves to breakeven (entry).
+            # Trade then targets T2. If T2 also hit → win at T2.
+            # If T1 hit but T2 not hit → exit at entry (breakeven = 0 loss).
+            # If T1 not hit and SL hit → loss at SL (normal stop).
+            if t1_hit:
+                if t2_hit:
+                    return t2, "T2"   # rode it to T2
+                elif t3_hit:
+                    return t3, "T3"
+                else:
+                    return entry, "BE"  # trailed to breakeven
+            elif sl_hit:
+                return sl, "SL"
+            else:
+                return 0.0, None      # EOD — flat
 
         else:  # pessimistic — proximity rule
             # If both SL and T1 are hit, use proximity to determine which was first

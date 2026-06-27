@@ -164,6 +164,14 @@ tr:hover td{background:rgba(255,255,255,.015);}
           <option value="8">8 / 10</option>
         </select>
       </div>
+      <div class="fg">
+        <label class="fl">EXIT MODEL</label>
+        <select class="fi" id="model">
+          <option value="pessimistic" selected>Pessimistic</option>
+          <option value="trail">Trail stop (recommended)</option>
+          <option value="optimistic">Optimistic</option>
+        </select>
+      </div>
       <button class="run-btn" id="run-btn" onclick="runBacktest()">RUN BACKTEST →</button>
     </div>
     <div style="display:flex;gap:20px;margin-top:14px;flex-wrap:wrap;">
@@ -289,7 +297,8 @@ async function runBacktest() {
     const ema      = document.getElementById('ema-filter').checked;
     const vol      = document.getElementById('volume-filter').checked;
     const breakout = document.getElementById('breakout-filter').checked;
-    const url = `${API}/api/backtest?symbol=${sym}&years=${years}&min_strength=${strength}&ema_filter=${ema}&volume_filter=${vol}&breakout_filter=${breakout}`;
+    const model    = document.getElementById('model').value;
+    const url = `${API}/api/backtest?symbol=${sym}&years=${years}&min_strength=${strength}&exit_model=${model}&ema_filter=${ema}&volume_filter=${vol}&breakout_filter=${breakout}`;
     const r = await fetch(url);
     if (!r.ok) {
       const err = await r.json();

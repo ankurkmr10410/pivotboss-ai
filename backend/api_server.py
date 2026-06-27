@@ -405,6 +405,7 @@ async def run_backtest(
     symbol: str = "NIFTY",
     years: float = 2.0,
     min_strength: int = 6,
+    exit_model: str = "pessimistic",
     ema_filter: bool = False,
     ema_period: int = 20,
     volume_filter: bool = False,
@@ -447,7 +448,7 @@ async def run_backtest(
         volume_multiplier=volume_mult,
         use_breakout_filter=breakout_filter,
     )
-    pess = CPRBacktester(min_strength=min_strength, exit_model="pessimistic", **_filters).run(symbol, candle_dicts)
+    pess = CPRBacktester(min_strength=min_strength, exit_model=exit_model,      **_filters).run(symbol, candle_dicts)
     opt  = CPRBacktester(min_strength=min_strength, exit_model="optimistic",  **_filters).run(symbol, candle_dicts)
 
     return {
