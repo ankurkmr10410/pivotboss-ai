@@ -137,15 +137,12 @@ class KotakConnector:
     def totp_login(self, ucc: Optional[str] = None, totp: Optional[str] = None) -> bool:
         """Step 1 of Kotak Neo v2 TOTP flow: create the view token.
 
-        Kotak's server rejects the mobileNumber field entirely (400 error).
-        We bypass the SDK and call the REST endpoint directly without it.
-        URL: https://mis.kotaksecurities.com/login/1.0/tradeApiLogin
+        Uses the SDK totp_login() with mobile in +91XXXXXXXXXX format.
+        The SDK uses "neotradeapi" as default neo_fin_key when not set in .env.
         """
-        import requests as _requests
-
         try:
             self._init_client()
-            ucc = (ucc or self.ucc).strip()
+            ucc  = (ucc or self.ucc).strip()
             totp = (totp or "").strip()
 
             missing = []
@@ -159,51 +156,37 @@ class KotakConnector:
                 logger.error("Missing Kotak TOTP login value(s): %s", ", ".join(missing))
                 return False
 
-            logger.info("Attempting Kotak TOTP login | UCC: %s", ucc)
-            logger.info(
-                "Credentials check | consumer_key=%s | neo_fin_key=%s | mobile=%s",
-                "SET" if self.consumer_key else "MISSING",
-                "SET" if self.neo_fin_key else "MISSING",
-                self._mask_mobile(self.mobile_number) if self.mobile_number else "MISSING",
+            # Kotak SDK requires mobile in +91XXXXXXXXXX format.
+            mobile = self.mobile_number.strip()
+            if not mobile.startswith("+"):
+                if mobile.startswith("91") and len(mobile) == 12:
+                    mobile = "+" + mobile
+                elif len(mobile) == 10:
+                    mobile = "+91" + mobile
+                else:
+                    mobile = "+91" + mobile[-10:]
+
+            logger.info("Attempting Kotak TOTP login | UCC: %s | mobile: %s",
+                        ucc, self._mask_mobile(mobile))
+            logger.info("Credentials | consumer_key=%s | neo_fin_key=%s",
+                        "SET" if self.consumer_key else "MISSING",
+                        "SET" if self.neo_fin_key else "using default")
+
+            resp = self.client.totp_login(
+                mobile_number=mobile,
+                ucc=ucc,
+                totp=totp,
             )
 
-            # Call the API directly with all required fields.
-            url = "https://mis.kotaksecurities.com/login/1.0/tradeApiLogin"
-            fin_key = self.neo_fin_key or "neotradeapi"
-            headers = {
-                "Authorization": self.consumer_key,
-                "Content-Type": "application/json",
-                "neo-fin-key": fin_key,
-            }
-            # Send mobile as 10-digit (strip country prefix if present)
-            mobile = self.mobile_number[-10:] if len(self.mobile_number) > 10 else self.mobile_number
-            body = {"mobileNumber": mobile, "ucc": ucc, "totp": totp}
-
-            logger.info("Request URL: %s", url)
-            logger.info("Request headers (masked): Authorization=%s... neo-fin-key=%s",
-                        self.consumer_key[:8] if self.consumer_key else "NONE",
-                        fin_key[:8])
-            logger.info("Request body: %s", {**body, "totp": "******"})
-            resp = _requests.post(url, json=body, headers=headers, timeout=15)
-            logger.info("Response status: %s | body: %s", resp.status_code, resp.text[:300])
-            data = resp.json()
-
-            if not (200 <= resp.status_code <= 299) or data.get("error"):
-                logger.error("TOTP login failed: %s", self._safe_response(data))
+            if self._response_has_error(resp):
+                logger.error("TOTP login failed: %s", self._safe_response(resp))
                 return False
-
-            # Store tokens on the SDK client so totp_validate works normally.
-            token = data.get("data", {}).get("token", "")
-            sid   = data.get("data", {}).get("sid", "")
-            self.client.api_client.configuration.view_token = token
-            self.client.api_client.configuration.sid = sid
 
             logger.info("Kotak Neo TOTP login accepted. Validate MPIN next.")
             return True
         except Exception as e:
             logger.error(f"TOTP login error: {e}")
             return False
-
     def totp_validate(self, mpin: Optional[str] = None) -> bool:
         """Step 2 of Kotak Neo v2 TOTP flow: validate MPIN and create trade token."""
         try:
