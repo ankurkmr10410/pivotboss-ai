@@ -344,12 +344,13 @@ async function get(p){const r=await fetch(API+p);if(!r.ok)throw r.status;return 
 
 async function poll(){
   try{
-    const[bot,port,trades,sigs,quotes]=await Promise.all([
+    const[bot,port,trades,sigs,quotes,sched,status]=await Promise.all([
       get('/api/bot'),get('/api/portfolio'),
-      get('/api/trades'),get('/api/signals'),get('/api/quotes')
+      get('/api/trades'),get('/api/signals'),get('/api/quotes'),
+      get('/api/scheduler'),get('/api/status')
     ]);
-    setOk(`${bot.connector_type||'MOCK'} — ${bot.mode||'paper'} mode`);
-    updConn(bot.connector_type);
+    setOk(`${bot.connector||'MOCK'} — ${bot.mode||'paper'} mode`);
+    updConn(bot.connector);
     updMkt();
     updPort(port);
     updKPIs(port);
@@ -357,8 +358,8 @@ async function poll(){
     Object.entries(quotes.quotes||{}).forEach(([k,v])=>ltpCache[k]=v);
     updWatchlist(quotes,sigs);
     updTrades(trades);
-    updSched(bot);
-    updDB(bot);
+    updSched(sched);
+    updDB(status);
     updEQ(port);
     if(!activeSym&&sigs.length)selSym(sigs[0].symbol);
     else if(activeSym)renderActive();
@@ -413,7 +414,7 @@ function updWatchlist(quotes,sigs){
   if(!syms.length)return;
   document.getElementById('wl').innerHTML=syms.map(sym=>{
     const q=qm[sym]||{},sg=sm[sym]||{};
-    const ltp=q.ltp,chgPct=ltp&&q.open?(((ltp-q.open)/q.open)*100).toFixed(2):null;
+    const ltp=q.ltp,chgPct=(ltp&&q.open&&q.open>0)?(((ltp-q.open)/q.open)*100).toFixed(2):null;
     const sig=sg.signal||'NEUTRAL',str=sg.strength||0;
     const sc=sig.includes('BUY')?'var(--gr)':sig.includes('SELL')?'var(--rd)':'var(--mu)';
     return`<div class="scard ${sym===activeSym?'on':''}" onclick="selSym('${sym}')">
@@ -524,8 +525,8 @@ function updTrades(trades){
   }).join('');
 }
 
-function updSched(bot){
-  const jobs=bot.scheduler_jobs||[];
+function updSched(sched){
+  const jobs=sched.jobs||[];
   if(!jobs.length){document.getElementById('schlist').innerHTML='<div class="schitem"><div class="schdot schw"></div><span class="schn2 mu">No scheduler data</span></div>';return;}
   const now=new Date();
   document.getElementById('schlist').innerHTML=jobs.map(j=>{
@@ -539,8 +540,8 @@ function updSched(bot){
   }).join('');
 }
 
-function updDB(bot){
-  const c=bot.db_counts||{};
+function updDB(status){
+  const c=status.counts||{};
   const keys=Object.keys(c);
   if(!keys.length){document.getElementById('dbg').innerHTML='<span class="mu">No data</span>';return;}
   document.getElementById('dbg').innerHTML=keys.map(k=>`

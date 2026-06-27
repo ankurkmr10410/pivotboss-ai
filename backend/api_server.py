@@ -400,6 +400,68 @@ def bot_status() -> Dict[str, Any]:
 
 # ── dashboard + static ─────────────────────────────────────────────────────
 
+@app.get("/api/backtest")
+async def run_backtest(
+    symbol: str = "NIFTY",
+    years: float = 2.0,
+    min_strength: int = 6,
+):
+    """Run CPR backtest on historical Yahoo data and return results."""
+    import asyncio
+    from datetime import date, timedelta
+    from providers.yahoo_provider import YahooProvider
+    from backtester import CPRBacktester
+    from config_loader import Watchlist
+    from db import MarketStore as _MS
+
+    wl = Watchlist()
+    if symbol not in wl.names():
+        raise HTTPException(400, f"Unknown symbol '{symbol}'. Available: {wl.names()}")
+
+    end = date.today()
+    start = end - timedelta(days=int(years * 365))
+
+    # Try DB cache first
+    _store = _MS()
+    await _store.init()
+    cached = await _store.get_candles(symbol, start=str(start), end=str(end))
+    if cached and len(cached) > 10:
+        candle_dicts = [c.to_dict() for c in cached]
+    else:
+        provider = YahooProvider.from_watchlist(wl)
+        candles = provider.get_history_range(symbol, start, end)
+        candle_dicts = [c.to_dict() for c in candles]
+
+    if len(candle_dicts) < 3:
+        raise HTTPException(503, f"Not enough historical data for {symbol} — Yahoo may be rate-limiting.")
+
+    pess = CPRBacktester(min_strength=min_strength, exit_model="pessimistic").run(symbol, candle_dicts)
+    opt  = CPRBacktester(min_strength=min_strength, exit_model="optimistic").run(symbol, candle_dicts)
+
+    return {
+        "symbol": symbol,
+        "start_date": str(start),
+        "end_date": str(end),
+        "years": years,
+        "min_strength": min_strength,
+        "candles": len(candle_dicts),
+        "pessimistic": pess.metrics(),
+        "optimistic": opt.metrics(),
+        "by_cpr_type": pess.breakdown_by_cpr_type(),
+        "by_signal": pess.breakdown_by_signal(),
+        "trades": [t.to_dict() for t in pess.trades[-50:]],  # last 50 trades
+    }
+
+
+@app.get("/backtest")
+def backtest_page():
+    """Serve the backtest UI page."""
+    bt_page = Path(__file__).parent.parent / "frontend" / "backtest.html"
+    if not bt_page.exists():
+        raise HTTPException(404, "backtest.html not found")
+    return FileResponse(bt_page)
+
+
 @app.get("/")
 def dashboard():
     """Serve the dashboard so a single uvicorn process is all you need."""

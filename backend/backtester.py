@@ -227,12 +227,26 @@ class CPRBacktester:
                 return day_high >= level
             return day_low <= level
 
+        sl_hit = hit(sl)
+        t1_hit = hit(t1)
+        t2_hit = hit(t2)
+        t3_hit = hit(t3)
+
+        # Intrabar proximity rule: when both SL and a target are hit on the same
+        # daily candle, assume whichever level is CLOSER to the opening price was
+        # reached first. This is more realistic than always assuming SL hits first
+        # (pure pessimistic) since NIFTY often gaps/moves toward target at open.
+        sl_dist = abs(entry - sl)
+        t1_dist = abs(entry - t1)
+        sl_first = sl_dist <= t1_dist  # SL closer to entry → more likely hit first
+
         exit_price, exit_reason = self._resolve_exit(
             direction=direction,
-            sl_hit=hit(sl),
-            t1_hit=hit(t1),
-            t2_hit=hit(t2),
-            t3_hit=hit(t3),
+            sl_hit=sl_hit,
+            t1_hit=t1_hit,
+            t2_hit=t2_hit,
+            t3_hit=t3_hit,
+            sl_first=sl_first,
             sl=sl, t1=t1, t2=t2, t3=t3,
         )
 
@@ -265,26 +279,47 @@ class CPRBacktester:
 
     def _resolve_exit(
         self, direction: str, sl_hit: bool, t1_hit: bool, t2_hit: bool, t3_hit: bool,
+        sl_first: bool,
         sl: float, t1: float, t2: float, t3: float,
     ) -> (float, Optional[str]):
         """
         Decide which level to credit the exit to, given the day's range.
 
-        Pessimistic (default): if both SL and any target were touchable today,
-        assume the worse outcome for the trader (SL first). This is the safer
-        overestimate of risk when only OHLC is available.
+        Three models:
+        - pessimistic: if SL is closer to entry than T1, SL wins when both hit.
+          Uses intrabar proximity rule — closer level to open is assumed first hit.
+        - optimistic: targets always win over SL (upper bound).
 
-        Optimistic: assume targets are reached before SL (upper-bound of results).
         The true expectancy lies between the two.
         """
-        # Direction-agnostic: for LONG, targets are above entry and SL below.
-        # We pick the first reachable level in priority order.
-        if self.exit_model == "pessimistic":
-            order = [("SL", sl_hit, sl), ("T3", t3_hit, t3), ("T2", t2_hit, t2), ("T1", t1_hit, t1)]
-        else:  # optimistic
-            order = [("T3", t3_hit, t3), ("T2", t2_hit, t2), ("T1", t1_hit, t1), ("SL", sl_hit, sl)]
+        if self.exit_model == "optimistic":
+            # Best case: targets take priority
+            for name, touched, level in [
+                ("T3", t3_hit, t3), ("T2", t2_hit, t2),
+                ("T1", t1_hit, t1), ("SL", sl_hit, sl)
+            ]:
+                if touched:
+                    return level, name
 
-        for name, touched, level in order:
-            if touched:
-                return level, name
+        else:  # pessimistic — proximity rule
+            # If both SL and T1 are hit, use proximity to determine which was first
+            if sl_hit and (t1_hit or t2_hit or t3_hit):
+                if sl_first:
+                    return sl, "SL"
+                else:
+                    # Target was closer → likely hit first; pick highest hit target
+                    for name, touched, level in [
+                        ("T3", t3_hit, t3), ("T2", t2_hit, t2), ("T1", t1_hit, t1)
+                    ]:
+                        if touched:
+                            return level, name
+            elif sl_hit:
+                return sl, "SL"
+            else:
+                for name, touched, level in [
+                    ("T3", t3_hit, t3), ("T2", t2_hit, t2), ("T1", t1_hit, t1)
+                ]:
+                    if touched:
+                        return level, name
+
         return 0.0, None

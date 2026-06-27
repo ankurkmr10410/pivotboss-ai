@@ -670,15 +670,31 @@ class MockKotakConnector(KotakConnector):
 
 # ── FACTORY ────────────────────────────────────────────────────────────────────
 
+# Module-level singleton — set by --login flow so the bot reuses the same session.
+_connector_singleton: Optional[KotakConnector] = None
+
+
+def set_connector(conn: "KotakConnector") -> None:
+    """Store a pre-logged-in connector so get_connector() reuses it.
+    Called by run.py --login after interactive TOTP succeeds."""
+    global _connector_singleton
+    _connector_singleton = conn
+    logger.info("Connector singleton set: %s", type(conn).__name__)
+
+
 def get_connector(mock: bool = False, auto_login: bool = True) -> KotakConnector:
     """
     Returns the appropriate connector.
-    Set mock=True to use fake data (no credentials needed).
-    Set PAPER_TRADING_MODE=true in .env to prevent real orders even with live connector.
-
-    When mock=False and auto_login=True, attempts a live Kotak login on the
-    returned connector (via KOTAK_TOTP_SEED if set, else interactive prompt).
+    - If set_connector() was called (e.g. after --login), reuses that session.
+    - Set mock=True to use fake data (no credentials needed).
+    - Set PAPER_TRADING_MODE=true in .env to prevent real orders even with live connector.
+    - When mock=False and auto_login=True, attempts a live Kotak login.
     """
+    global _connector_singleton
+    if _connector_singleton is not None:
+        logger.info("Reusing pre-logged-in connector singleton: %s", type(_connector_singleton).__name__)
+        return _connector_singleton
+
     if mock or not os.getenv("KOTAK_CONSUMER_KEY"):
         logger.info("Using MOCK connector (no credentials found)")
         conn = MockKotakConnector()

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PivotBoss AI — Backtester</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#08111e;--s1:#0d1929;--s2:#111f30;--s3:#162640;
+  --b0:rgba(255,255,255,.05);--b1:rgba(255,255,255,.09);--b2:rgba(255,255,255,.15);
+  --tx:#dce8f5;--mu:#4d6278;
+  --gr:#00e5a0;--rd:#ff4560;--yw:#f0b429;--bl:#3d8bff;--pu:#9b6dff;
+  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--tx);font-family:var(--sans);min-height:100vh;}
+
+/* topbar */
+.top{display:flex;align-items:center;gap:16px;padding:0 24px;height:50px;
+  background:var(--s1);border-bottom:1px solid var(--b0);}
+.logo{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:3px;
+  display:flex;align-items:center;gap:8px;}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--gr);box-shadow:0 0 8px var(--gr);}
+.back{font-family:var(--mono);font-size:10px;color:var(--mu);text-decoration:none;
+  padding:5px 10px;border:1px solid var(--b1);border-radius:4px;transition:.15s;margin-left:auto;}
+.back:hover{color:var(--tx);border-color:var(--b2);}
+
+/* main layout */
+.wrap{max-width:1280px;margin:0 auto;padding:28px 24px;}
+
+/* config panel */
+.config{background:var(--s1);border:1px solid var(--b0);border-radius:8px;padding:20px 24px;margin-bottom:24px;}
+.config-title{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--mu);margin-bottom:16px;}
+.config-row{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;}
+.fg{display:flex;flex-direction:column;gap:5px;}
+.fl{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mu);}
+.fi{background:var(--s2);border:1px solid var(--b1);border-radius:5px;
+  padding:8px 12px;color:var(--tx);font-family:var(--mono);font-size:12px;
+  outline:none;min-width:120px;transition:.15s;}
+.fi:focus{border-color:var(--bl);}
+select.fi{cursor:pointer;}
+.run-btn{background:linear-gradient(135deg,var(--bl),#2060cc);border:none;
+  border-radius:5px;padding:9px 24px;color:#fff;font-family:var(--mono);
+  font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;
+  transition:.15s;white-space:nowrap;}
+.run-btn:hover{opacity:.85;}
+.run-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* status */
+.status-bar{display:flex;align-items:center;gap:10px;
+  padding:10px 16px;background:var(--s2);border:1px solid var(--b0);
+  border-radius:6px;margin-bottom:20px;font-family:var(--mono);font-size:11px;}
+.sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.sok{background:var(--gr);}
+.serr{background:var(--rd);}
+.srun{background:var(--yw);animation:blink .8s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.sidle{background:var(--mu);}
+
+/* verdict */
+.verdict{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;}
+.vcard{border-radius:8px;padding:20px 24px;border:2px solid;}
+.vcard.good{background:rgba(0,229,160,.05);border-color:rgba(0,229,160,.3);}
+.vcard.bad{background:rgba(255,69,96,.05);border-color:rgba(255,69,96,.3);}
+.vcard.neutral{background:rgba(61,139,255,.05);border-color:rgba(61,139,255,.2);}
+.vt{font-family:var(--mono);font-size:9px;letter-spacing:2px;margin-bottom:8px;}
+.vv{font-family:var(--mono);font-size:32px;font-weight:700;line-height:1;margin-bottom:4px;}
+.vs{font-size:12px;color:var(--mu);}
+
+/* kpi grid */
+.kgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;}
+.kcard{background:var(--s1);border:1px solid var(--b0);border-radius:7px;padding:14px 16px;}
+.kl{font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--mu);margin-bottom:7px;}
+.kv{font-family:var(--mono);font-size:20px;font-weight:600;}
+.ks{font-family:var(--mono);font-size:9px;color:var(--mu);margin-top:3px;}
+
+/* comparison */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;}
+.panel{background:var(--s1);border:1px solid var(--b0);border-radius:7px;overflow:hidden;}
+.ph{padding:11px 16px;border-bottom:1px solid var(--b0);
+  font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--mu);
+  display:flex;align-items:center;justify-content:space-between;}
+.pb{padding:14px 16px;}
+
+/* breakdown table */
+.btable{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;}
+.btable th{font-size:8px;letter-spacing:1.5px;color:var(--mu);text-align:left;
+  padding:8px 10px;border-bottom:1px solid var(--b0);font-weight:400;}
+.btable td{padding:7px 10px;border-bottom:1px solid var(--b0);}
+.btable tr:last-child td{border:none;}
+.btable tr:hover td{background:rgba(255,255,255,.02);}
+
+/* model comparison */
+.model-row{display:flex;align-items:center;justify-content:space-between;
+  padding:7px 0;border-bottom:1px solid var(--b0);font-family:var(--mono);font-size:11px;}
+.model-row:last-child{border:none;}
+.model-label{color:var(--mu);font-size:9px;letter-spacing:1px;}
+
+/* equity curve */
+.eq-wrap{background:var(--s1);border:1px solid var(--b0);border-radius:7px;
+  overflow:hidden;margin-bottom:24px;}
+.eq-chart{padding:16px;}
+#eq-svg{width:100%;height:140px;}
+
+/* trade table */
+.trade-wrap{background:var(--s1);border:1px solid var(--b0);border-radius:7px;overflow:hidden;}
+table{width:100%;border-collapse:collapse;}
+th{font-family:var(--mono);font-size:8px;letter-spacing:1.5px;color:var(--mu);
+  text-align:left;padding:9px 12px;border-bottom:1px solid var(--b0);
+  font-weight:400;background:var(--s2);}
+td{padding:7px 12px;font-family:var(--mono);font-size:10px;
+  border-bottom:1px solid var(--b0);vertical-align:middle;}
+tr:last-child td{border:none;}
+tr:hover td{background:rgba(255,255,255,.015);}
+.eb{display:inline-block;padding:2px 6px;border-radius:3px;font-size:8px;font-weight:700;letter-spacing:1px;}
+.eSL{background:rgba(255,69,96,.12);color:var(--rd);}
+.eT1{background:rgba(0,229,160,.08);color:#66e8b0;}
+.eT2{background:rgba(0,229,160,.12);color:var(--gr);}
+.eT3{background:rgba(0,229,160,.18);color:#00ffbb;}
+.eEOD{background:rgba(77,98,120,.12);color:var(--mu);}
+
+.gr{color:var(--gr);} .rd{color:var(--rd);} .yw{color:var(--yw);}
+.bl{color:var(--bl);} .mu{color:var(--mu);}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="logo"><div class="dot"></div>PIVOTBOSS AI</div>
+  <span style="font-family:var(--mono);font-size:10px;color:var(--mu);">BACKTESTER</span>
+  <a href="/" class="back">← DASHBOARD</a>
+</header>
+
+<div class="wrap">
+
+  <!-- CONFIG -->
+  <div class="config">
+    <div class="config-title">BACKTEST CONFIGURATION</div>
+    <div class="config-row">
+      <div class="fg">
+        <label class="fl">SYMBOL</label>
+        <select class="fi" id="sym">
+          <option>NIFTY</option><option>BANKNIFTY</option>
+          <option>RELIANCE</option><option>HDFCBANK</option>
+          <option>TCS</option><option>INFY</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label class="fl">YEARS OF DATA</label>
+        <select class="fi" id="years">
+          <option value="1">1 Year</option>
+          <option value="2" selected>2 Years</option>
+          <option value="3">3 Years</option>
+          <option value="5">5 Years</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label class="fl">MIN SIGNAL STRENGTH</label>
+        <select class="fi" id="strength">
+          <option value="5">5 / 10</option>
+          <option value="6" selected>6 / 10</option>
+          <option value="7">7 / 10</option>
+          <option value="8">8 / 10</option>
+        </select>
+      </div>
+      <button class="run-btn" id="run-btn" onclick="runBacktest()">RUN BACKTEST →</button>
+    </div>
+  </div>
+
+  <!-- STATUS -->
+  <div class="status-bar">
+    <div class="sdot sidle" id="sdot"></div>
+    <span id="smsg" style="color:var(--mu)">Configure parameters above and click RUN BACKTEST</span>
+    <span style="margin-left:auto;color:var(--mu);font-size:9px;" id="sinfo"></span>
+  </div>
+
+  <!-- RESULTS (hidden until run) -->
+  <div id="results" style="display:none;">
+
+    <!-- VERDICT -->
+    <div class="verdict">
+      <div id="vcard-left" class="vcard neutral">
+        <div class="vt">WIN RATE (PESSIMISTIC)</div>
+        <div class="vv" id="v-winrate">—</div>
+        <div class="vs" id="v-winrate-sub">—</div>
+      </div>
+      <div id="vcard-right" class="vcard neutral">
+        <div class="vt">PROFIT FACTOR</div>
+        <div class="vv" id="v-pf">—</div>
+        <div class="vs" id="v-pf-sub">—</div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="kgrid">
+      <div class="kcard"><div class="kl">TOTAL TRADES</div><div class="kv" id="k-trades">—</div><div class="ks" id="k-trades-s">—</div></div>
+      <div class="kcard"><div class="kl">NET POINTS</div><div class="kv" id="k-net">—</div><div class="ks" id="k-net-s">pessimistic model</div></div>
+      <div class="kcard"><div class="kl">EXPECTANCY</div><div class="kv" id="k-exp">—</div><div class="ks">pts per trade</div></div>
+      <div class="kcard"><div class="kl">MAX DRAWDOWN</div><div class="kv rd" id="k-dd">—</div><div class="ks">from equity peak</div></div>
+    </div>
+
+    <!-- EQUITY CURVE -->
+    <div class="eq-wrap">
+      <div class="ph"><span>EQUITY CURVE (cumulative points)</span><span class="mu" id="eq-label">—</span></div>
+      <div class="eq-chart"><svg id="eq-svg" viewBox="0 0 900 140" preserveAspectRatio="none"></svg></div>
+    </div>
+
+    <!-- BREAKDOWNS + MODEL COMPARISON -->
+    <div class="compare">
+      <div class="panel">
+        <div class="ph"><span>BREAKDOWN BY CPR TYPE</span></div>
+        <div class="pb">
+          <table class="btable">
+            <thead><tr><th>CPR TYPE</th><th>TRADES</th><th>WIN RATE</th><th>NET PTS</th></tr></thead>
+            <tbody id="cpr-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><span>PESSIMISTIC vs OPTIMISTIC</span><span class="mu" style="font-size:9px;">truth lies between</span></div>
+        <div class="pb">
+          <div id="model-compare"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIGNAL BREAKDOWN -->
+    <div class="panel" style="margin-bottom:24px;">
+      <div class="ph"><span>BREAKDOWN BY SIGNAL TYPE</span></div>
+      <div class="pb">
+        <table class="btable">
+          <thead><tr><th>SIGNAL</th><th>TRADES</th><th>WIN RATE</th><th>NET PTS</th></tr></thead>
+          <tbody id="sig-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TRADE LOG -->
+    <div class="trade-wrap">
+      <div class="ph"><span>RECENT TRADES (last 50)</span><span id="trade-count" class="mu">—</span></div>
+      <table>
+        <thead><tr>
+          <th>DATE</th><th>SIGNAL</th><th>DIR</th><th>CPR</th>
+          <th>ENTRY</th><th>EXIT</th><th>EXIT REASON</th>
+          <th>STR</th><th>PNL PTS</th><th>PNL %</th>
+        </tr></thead>
+        <tbody id="trade-tbody"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+let lastResult = null;
+
+async function runBacktest() {
+  const sym = document.getElementById('sym').value;
+  const years = document.getElementById('years').value;
+  const strength = document.getElementById('strength').value;
+  const btn = document.getElementById('run-btn');
+
+  btn.disabled = true;
+  btn.textContent = 'RUNNING...';
+  setStatus('run', `Fetching ${years} years of ${sym} data from Yahoo Finance...`);
+  document.getElementById('results').style.display = 'none';
+
+  try {
+    const url = `${API}/api/backtest?symbol=${sym}&years=${years}&min_strength=${strength}`;
+    const r = await fetch(url);
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    lastResult = await r.json();
+    renderResults(lastResult);
+    setStatus('ok', `Backtest complete — ${lastResult.candles} candles, ${lastResult.pessimistic.total_trades} trades`);
+    document.getElementById('results').style.display = 'block';
+  } catch(e) {
+    setStatus('err', `Error: ${e.message}`);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'RUN BACKTEST →';
+}
+
+function setStatus(state, msg, info='') {
+  const dot = document.getElementById('sdot');
+  const txt = document.getElementById('smsg');
+  dot.className = 'sdot ' + {ok:'sok', err:'serr', run:'srun', idle:'sidle'}[state];
+  txt.textContent = msg;
+  txt.style.color = {ok:'var(--gr)', err:'var(--rd)', run:'var(--yw)', idle:'var(--mu)'}[state];
+  document.getElementById('sinfo').textContent = info;
+}
+
+function renderResults(d) {
+  const p = d.pessimistic, o = d.optimistic;
+
+  // VERDICT
+  const wr = p.win_rate;
+  const pf = p.profit_factor;
+  const vl = document.getElementById('vcard-left');
+  const vr = document.getElementById('vcard-right');
+  vl.className = 'vcard ' + (wr >= 55 ? 'good' : wr >= 45 ? 'neutral' : 'bad');
+  vr.className = 'vcard ' + (pf >= 1.5 ? 'good' : pf >= 1.0 ? 'neutral' : 'bad');
+  document.getElementById('v-winrate').textContent = wr + '%';
+  document.getElementById('v-winrate').className = 'vv ' + (wr >= 55 ? 'gr' : wr >= 45 ? 'yw' : 'rd');
+  document.getElementById('v-winrate-sub').textContent = wr >= 55 ? 'DEPLOYABLE — win rate above threshold' : wr >= 45 ? 'MARGINAL — needs more validation' : 'BELOW THRESHOLD — do not deploy';
+  document.getElementById('v-pf').textContent = pf >= 999 ? '∞' : pf.toFixed(2);
+  document.getElementById('v-pf').className = 'vv ' + (pf >= 1.5 ? 'gr' : pf >= 1.0 ? 'yw' : 'rd');
+  document.getElementById('v-pf-sub').textContent = pf >= 1.5 ? 'STRONG — strategy is profitable' : pf >= 1.0 ? 'BREAKEVEN — marginal edge' : 'LOSING — refine parameters';
+
+  // KPIs
+  document.getElementById('k-trades').textContent = p.total_trades;
+  document.getElementById('k-trades-s').textContent = `${d.start_date} → ${d.end_date}`;
+  const netEl = document.getElementById('k-net');
+  netEl.textContent = (p.net_points >= 0 ? '+' : '') + p.net_points.toFixed(0) + ' pts';
+  netEl.className = 'kv ' + (p.net_points >= 0 ? 'gr' : 'rd');
+  document.getElementById('k-exp').textContent = (p.expectancy_points >= 0 ? '+' : '') + p.expectancy_points.toFixed(1);
+  document.getElementById('k-dd').textContent = p.max_drawdown_pct.toFixed(2) + '%';
+
+  // EQUITY CURVE
+  renderEquity(d.trades);
+  document.getElementById('eq-label').textContent = `${d.symbol} — ${d.years}yr — strength ≥ ${d.min_strength}`;
+
+  // CPR BREAKDOWN
+  const cprRows = Object.entries(d.by_cpr_type).map(([k, v]) => {
+    const col = v.win_rate >= 55 ? 'var(--gr)' : v.win_rate >= 45 ? 'var(--yw)' : 'var(--rd)';
+    const nc = v.net_points >= 0 ? 'var(--gr)' : 'var(--rd)';
+    return `<tr>
+      <td style="font-weight:700">${k}</td>
+      <td class="mu">${v.trades}</td>
+      <td style="color:${col};font-weight:700">${v.win_rate}%</td>
+      <td style="color:${nc}">${v.net_points >= 0 ? '+' : ''}${v.net_points}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('cpr-tbody').innerHTML = cprRows || '<tr><td colspan="4" class="mu">No data</td></tr>';
+
+  // SIGNAL BREAKDOWN
+  const sigRows = Object.entries(d.by_signal).map(([k, v]) => {
+    const col = v.win_rate >= 55 ? 'var(--gr)' : v.win_rate >= 45 ? 'var(--yw)' : 'var(--rd)';
+    const nc = v.net_points >= 0 ? 'var(--gr)' : 'var(--rd)';
+    return `<tr>
+      <td style="font-weight:700">${k.replace('_',' ')}</td>
+      <td class="mu">${v.trades}</td>
+      <td style="color:${col};font-weight:700">${v.win_rate}%</td>
+      <td style="color:${nc}">${v.net_points >= 0 ? '+' : ''}${v.net_points}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('sig-tbody').innerHTML = sigRows || '<tr><td colspan="4" class="mu">No data</td></tr>';
+
+  // MODEL COMPARISON
+  const metrics = [
+    ['WIN RATE',    p.win_rate + '%',              o.win_rate + '%'],
+    ['PROFIT FACTOR', p.profit_factor >= 999 ? '∞' : p.profit_factor.toFixed(2), o.profit_factor >= 999 ? '∞' : o.profit_factor.toFixed(2)],
+    ['NET POINTS',  (p.net_points >= 0 ? '+' : '') + p.net_points,  (o.net_points >= 0 ? '+' : '') + o.net_points],
+    ['EXPECTANCY',  p.expectancy_points.toFixed(1), o.expectancy_points.toFixed(1)],
+    ['AVG WIN',     p.avg_win.toFixed(1),           o.avg_win.toFixed(1)],
+    ['AVG LOSS',    p.avg_loss.toFixed(1),           o.avg_loss.toFixed(1)],
+    ['MAX DD %',    p.max_drawdown_pct + '%',        o.max_drawdown_pct + '%'],
+  ];
+  document.getElementById('model-compare').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;font-family:var(--mono);font-size:10px;">
+      <div style="padding:6px 0;border-bottom:1px solid var(--b0);color:var(--mu);font-size:8px;letter-spacing:1px;">METRIC</div>
+      <div style="padding:6px 0;border-bottom:1px solid var(--b0);color:var(--rd);font-size:8px;letter-spacing:1px;">PESSIMISTIC</div>
+      <div style="padding:6px 0;border-bottom:1px solid var(--b0);color:var(--gr);font-size:8px;letter-spacing:1px;">OPTIMISTIC</div>
+      ${metrics.map(([l,pv,ov]) => `
+        <div style="padding:6px 0;border-bottom:1px solid var(--b0);color:var(--mu);font-size:9px;letter-spacing:1px;">${l}</div>
+        <div style="padding:6px 0;border-bottom:1px solid var(--b0);color:var(--rd)">${pv}</div>
+        <div style="padding:6px 0;border-bottom:1px solid var(--b0);color:var(--gr)">${ov}</div>
+      `).join('')}
+    </div>`;
+
+  // TRADE LOG
+  document.getElementById('trade-count').textContent = d.trades.length + ' shown';
+  document.getElementById('trade-tbody').innerHTML = d.trades.map(t => {
+    const pc = t.pnl_points > 0 ? 'var(--gr)' : 'var(--rd)';
+    const dc = t.direction === 'LONG' ? 'var(--gr)' : 'var(--rd)';
+    return `<tr>
+      <td class="mu">${t.entry_date}</td>
+      <td style="font-weight:700">${t.signal.replace('_',' ')}</td>
+      <td style="color:${dc};font-weight:700">${t.direction}</td>
+      <td class="mu">${t.cpr_type}${t.is_virgin ? ' ★' : ''}</td>
+      <td>${t.entry.toLocaleString('en-IN')}</td>
+      <td>${t.exit_price.toLocaleString('en-IN')}</td>
+      <td><span class="eb e${t.exit_reason}">${t.exit_reason}</span></td>
+      <td class="mu">${t.strength}/10</td>
+      <td style="color:${pc};font-weight:700">${t.pnl_points >= 0 ? '+' : ''}${t.pnl_points}</td>
+      <td style="color:${pc}">${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(2)}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderEquity(trades) {
+  if (!trades || !trades.length) return;
+  const pnls = trades.map(t => t.pnl_points);
+  let cum = 0, curve = [];
+  pnls.forEach(p => { cum += p; curve.push(cum); });
+
+  const W = 900, H = 140, pad = 20;
+  const minV = Math.min(0, ...curve);
+  const maxV = Math.max(0, ...curve);
+  const range = maxV - minV || 1;
+  const toY = v => H - pad - ((v - minV) / range) * (H - pad * 2);
+  const toX = i => pad + (i / (curve.length - 1)) * (W - pad * 2);
+  const zeroY = toY(0);
+
+  let path = curve.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
+  const last = curve[curve.length - 1];
+  const col = last >= 0 ? '#00e5a0' : '#ff4560';
+
+  document.getElementById('eq-svg').innerHTML = `
+    <defs>
+      <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${col}" stop-opacity=".25"/>
+        <stop offset="100%" stop-color="${col}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <!-- zero line -->
+    <line x1="${pad}" y1="${zeroY.toFixed(1)}" x2="${W-pad}" y2="${zeroY.toFixed(1)}"
+      stroke="rgba(255,255,255,.08)" stroke-width="1" stroke-dasharray="4 4"/>
+    <!-- fill -->
+    <path d="${path} L${toX(curve.length-1).toFixed(1)},${zeroY.toFixed(1)} L${pad},${zeroY.toFixed(1)} Z"
+      fill="url(#eg)"/>
+    <!-- line -->
+    <path d="${path}" fill="none" stroke="${col}" stroke-width="1.8"/>
+    <!-- end dot -->
+    <circle cx="${toX(curve.length-1).toFixed(1)}" cy="${toY(last).toFixed(1)}" r="3" fill="${col}"/>
+    <!-- labels -->
+    <text x="${pad}" y="${pad-4}" font-family="IBM Plex Mono" font-size="9" fill="rgba(255,255,255,.3)">${minV.toFixed(0)} pts</text>
+    <text x="${W-pad}" y="${pad-4}" text-anchor="end" font-family="IBM Plex Mono" font-size="9" fill="${col}">${last >= 0 ? '+' : ''}${last.toFixed(0)} pts</text>
+    <text x="${pad}" y="${H-4}" font-family="IBM Plex Mono" font-size="9" fill="rgba(255,255,255,.2)">${trades[0]?.entry_date||''}</text>
+    <text x="${W-pad}" y="${H-4}" text-anchor="end" font-family="IBM Plex Mono" font-size="9" fill="rgba(255,255,255,.2)">${trades[trades.length-1]?.entry_date||''}</text>`;
+}
+</script>
+</body>
+</html>

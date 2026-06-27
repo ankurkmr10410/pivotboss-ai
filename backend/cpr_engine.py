@@ -234,14 +234,14 @@ def generate_signal(cpr: CPRLevels, current_price: float,
             reasons.append("Narrow CPR → Strong trending up day expected")
             strength += 1
 
-        # Check proximity to resistance
+        # Check proximity to resistance — penalty but don't drop below 5
         if current_price >= cpr.r1 * 0.995:
             reasons.append(f"Near R1 ₹{cpr.r1} → Watch for resistance/reversal")
-            strength = max(4, strength - 2)
+            strength = max(5, strength - 1)
 
         if current_price >= cpr.r2 * 0.995:
             reasons.append(f"Near R2 ₹{cpr.r2} → Strong resistance, reduce position size")
-            strength = max(3, strength - 2)
+            strength = max(5, strength - 1)
 
         # Strong buy if just broke above TC with volume confirmation
         if opening_price <= cpr.tc and current_price > cpr.tc:
@@ -267,14 +267,14 @@ def generate_signal(cpr: CPRLevels, current_price: float,
             reasons.append("Narrow CPR → Strong trending down day expected")
             strength += 1
 
-        # Check proximity to support
+        # Check proximity to support — penalty but don't drop below 5
         if current_price <= cpr.s1 * 1.005:
             reasons.append(f"Near S1 ₹{cpr.s1} → Watch for support/bounce")
-            strength = max(4, strength - 2)
+            strength = max(5, strength - 1)
 
         if current_price <= cpr.s2 * 1.005:
             reasons.append(f"Near S2 ₹{cpr.s2} → Strong support, reduce short size")
-            strength = max(3, strength - 2)
+            strength = max(5, strength - 1)
 
         signal = Signal.STRONG_SELL if strength >= 8 else Signal.SELL
 

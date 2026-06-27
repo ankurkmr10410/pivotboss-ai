@@ -1,0 +1,219 @@
+diff --git a/backend/api_server.py b/backend/api_server.py
+index e32b89f..bd69dca 100644
+--- a/backend/api_server.py
++++ b/backend/api_server.py
+@@ -51,6 +51,7 @@ _BACKEND = Path(__file__).resolve().parent
+ if str(_BACKEND) not in sys.path:
+     sys.path.insert(0, str(_BACKEND))
+ 
++from contextlib import asynccontextmanager
+ from fastapi import FastAPI, HTTPException, Query
+ from fastapi.middleware.cors import CORSMiddleware
+ from fastapi.responses import FileResponse, JSONResponse
+@@ -77,20 +78,6 @@ _DASHBOARD = _REPO_ROOT / "frontend" / "dashboard.html"
+ 
+ # ── app + store ────────────────────────────────────────────────────────────
+ 
+-app = FastAPI(
+-    title="PivotBoss AI",
+-    description="CPR-based trading system API (paper trading + analytics)",
+-    version="0.5.0",
+-)
+-
+-# Allow the dashboard (opened as file://) and any local dev origin to call us.
+-app.add_middleware(
+-    CORSMiddleware,
+-    allow_origins=["*"],   # local-only server; tighten for production
+-    allow_methods=["GET"],
+-    allow_headers=["*"],
+-)
+-
+ store = MarketStore()
+ 
+ # Bot + scheduler — initialised on startup so they share the store singleton.
+@@ -98,30 +85,41 @@ bot: PivotBossBot | None = None
+ scheduler: TradingScheduler | None = None
+ 
+ 
+-@app.on_event("startup")
+-async def _startup() -> None:
+-    """Ensure the schema exists, then boot the bot + scheduler."""
+-    await store.init()
+-    logger.info("API store ready at %s", store.db_path)
+-
++@asynccontextmanager
++async def _lifespan(app: FastAPI):
++    """Lifespan handler — replaces deprecated on_event startup/shutdown."""
+     global bot, scheduler
+-    bot = PivotBossBot()
++
++    logger.info("API store ready at %s", store.db_path)
++    bot = await PivotBossBot.create_async()
+     scheduler = create_scheduler(bot=bot, store=store)
+     scheduler.start()
+-
+-    # Expose on app.state so future endpoints / middleware can reach them.
+     app.state.bot = bot
+     app.state.scheduler = scheduler
+ 
++    yield  # server is running
+ 
+-@app.on_event("shutdown")
+-async def _shutdown() -> None:
+-    """Gracefully stop the scheduler on process exit."""
+     if scheduler is not None:
+         scheduler.stop()
+         logger.info("Scheduler shut down.")
+ 
+ 
++app = FastAPI(
++    title="PivotBoss AI",
++    description="CPR-based trading system API (paper trading + analytics)",
++    version="0.5.0",
++    lifespan=_lifespan,
++)
++
++# Allow the dashboard (opened as file://) and any local dev origin to call us.
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=["*"],   # local-only server; tighten for production
++    allow_methods=["GET"],
++    allow_headers=["*"],
++)
++
++
+ # ── helpers ────────────────────────────────────────────────────────────────
+ 
+ def _run(coro):
+@@ -397,6 +395,8 @@ if __name__ == "__main__":
+                         help="Force mock data (no Kotak login). Overrides PIVOTBOSS_MOCK.")
+     parser.add_argument("--live", action="store_true",
+                         help="Force live Kotak data with auto-login.")
++    parser.add_argument("--login", action="store_true",
++                        help="Interactive TOTP login before starting the server (use once per day).")
+     parser.add_argument("--port", type=int, default=8000)
+     parser.add_argument("--host", default="0.0.0.0")
+     args = parser.parse_args()
+@@ -404,7 +404,19 @@ if __name__ == "__main__":
+     # Honour explicit mode flags via env so the imported app picks them up.
+     if args.mock:
+         os.environ["PIVOTBOSS_MOCK"] = "true"
+-    elif args.live:
++    elif args.live or args.login:
++        os.environ["PIVOTBOSS_MOCK"] = "false"
++
++    # --login: do interactive TOTP now (TTY), store session, then start server.
++    # The session lives in the KotakConnector singleton for the process lifetime.
++    if args.login:
++        from kotak_connector import get_connector as _gc
++        _conn = _gc(mock=False, auto_login=False)
++        if not _conn.login_interactive():
++            print("\nLogin failed. Fix credentials in config/.env and retry.")
++            raise SystemExit(1)
++        print("\nKotak login successful -- starting API server...")
++        # Patch env so the bot inside uvicorn reuses the already-logged-in connector.
+         os.environ["PIVOTBOSS_MOCK"] = "false"
+ 
+     uvicorn.run(
+diff --git a/backend/kotak_connector.py b/backend/kotak_connector.py
+index 57b05ed..e499636 100644
+--- a/backend/kotak_connector.py
++++ b/backend/kotak_connector.py
+@@ -579,6 +579,7 @@ class MockKotakConnector(KotakConnector):
+         "RELIANCE":  {"ltp": 2968,  "open": 2960,  "high": 2980,  "low": 2920,  "close": 2955},
+         "HDFCBANK":  {"ltp": 1745,  "open": 1738,  "high": 1760,  "low": 1730,  "close": 1742},
+         "TCS":       {"ltp": 4125,  "open": 4108,  "high": 4150,  "low": 4090,  "close": 4118},
++        "INFY":      {"ltp": 1890,  "open": 1882,  "high": 1905,  "low": 1870,  "close": 1885},
+     }
+ 
+     def login(self) -> bool:
+diff --git a/backend/trading_bot.py b/backend/trading_bot.py
+index 6db711b..99ba249 100644
+--- a/backend/trading_bot.py
++++ b/backend/trading_bot.py
+@@ -89,6 +89,13 @@ class PivotBossBot:
+             logger.info("Migrating legacy %s into SQLite...", TRADE_FILE)
+             asyncio.run(self.store.migrate_from_json(Path(TRADE_FILE)))
+ 
++    async def _init_store_async(self) -> None:
++        """Async version of _init_store -- used when called from an async context (FastAPI)."""
++        await self.store.init()
++        if await self.store.needs_migration(Path(TRADE_FILE)):
++            logger.info("Migrating legacy %s into SQLite...", TRADE_FILE)
++            await self.store.migrate_from_json(Path(TRADE_FILE))
++
+     def _load_trader(self) -> PaperTrader:
+         try:
+             return asyncio.run(PaperTrader.load_from_store(self.store))
+@@ -96,6 +103,31 @@ class PivotBossBot:
+             logger.warning(f"Store load failed ({e}); starting fresh trader.")
+             return PaperTrader(starting_capital=500000)
+ 
++    async def _load_trader_async(self) -> PaperTrader:
++        """Async version of _load_trader -- used when called from an async context (FastAPI)."""
++        try:
++            return await PaperTrader.load_from_store(self.store)
++        except Exception as e:
++            logger.warning(f"Store load failed ({e}); starting fresh trader.")
++            return PaperTrader(starting_capital=500000)
++
++    @classmethod
++    async def create_async(cls, mock=None) -> "PivotBossBot":
++        """Async factory -- use this from FastAPI startup instead of PivotBossBot()."""
++        self = cls.__new__(cls)
++        if mock is None:
++            mock = os.getenv("PIVOTBOSS_MOCK", "").strip().lower() in ("1", "true", "yes")
++        self.mock = mock
++        self.connector = get_connector(mock=mock, auto_login=not mock)
++        self.connector_type = "MOCK" if mock else ("LIVE" if self.connector.is_logged_in else "LIVE-OFFLINE")
++        self.store = MarketStore()
++        await self._init_store_async()
++        self.trader = await self._load_trader_async()
++        self.analysis = {}
++        self.eod_provider = YahooProvider.from_watchlist(Watchlist())
++        logger.info(f"PivotBoss Bot initialized | Connector={self.connector_type}")
++        return self
++
+     # ── STEP 1: MORNING SETUP (run at 9:00 AM) ─────────────────────────────
+ 
+     def _fetch_eod_candles(self, symbol: str, days: int = 3):
+@@ -154,6 +186,19 @@ class PivotBossBot:
+                 prev   = candles[-1]   # yesterday
+                 prev2  = candles[-2]   # day before yesterday
+ 
++                # Look up yesterday's stored CPR for Virgin CPR detection.
++                # Virgin CPR = price never entered yesterday's CPR zone.
++                prev_cpr_tc = None
++                prev_cpr_bc = None
++                try:
++                    yesterday = prev["date"]
++                    prev_cpr = asyncio.run(self.store.get_cpr(symbol, yesterday))
++                    if prev_cpr:
++                        prev_cpr_tc = prev_cpr.tc
++                        prev_cpr_bc = prev_cpr.bc
++                except Exception as e:
++                    logger.debug(f"  {symbol}: no stored CPR for virgin check ({e})")
++
+                 # Build CPR from yesterday's data
+                 cpr = calculate_cpr(
+                     symbol=symbol,
+@@ -163,6 +208,8 @@ class PivotBossBot:
+                     close=prev["close"],
+                     prev_high=prev2["high"] if prev2 else None,
+                     prev_low=prev2["low"]   if prev2 else None,
++                    prev_cpr_high=prev_cpr_tc,
++                    prev_cpr_low=prev_cpr_bc,
+                 )
+ 
+                 self.analysis[symbol] = {
+@@ -230,8 +277,8 @@ class PivotBossBot:
+ 
+                 signals_generated.append(signal)
+ 
+-                # Auto paper trade if strength ≥ 7
+-                if signal.strength >= 7 and sig_val != "NEUTRAL":
++                # Auto paper trade if strength ≥ 6
++                if signal.strength >= 6 and sig_val != "NEUTRAL":
+                     self._auto_paper_trade(signal, quote)
+ 
+             except Exception as e:
