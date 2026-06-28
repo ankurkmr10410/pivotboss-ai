@@ -99,14 +99,110 @@ class WhatsAppCallMeBotProvider(AlertProvider):
             return False
 
 
+# ── EMAIL ─────────────────────────────────────────────────────────────────────
+
+class EmailAlertProvider(AlertProvider):
+    """
+    Send trade alerts via email using Gmail SMTP.
+
+    Env:
+      EMAIL_FROM    - sender Gmail address
+      EMAIL_TO      - recipient address (can be same as FROM)
+      EMAIL_PASS    - Gmail App Password (not your main password)
+                      Generate at: myaccount.google.com/apppasswords
+    """
+
+    def __init__(self):
+        self.from_addr = os.getenv("EMAIL_FROM", "").strip()
+        self.to_addr   = os.getenv("EMAIL_TO",   "").strip()
+        self.password  = os.getenv("EMAIL_PASS",  "").strip()
+        if not all([self.from_addr, self.to_addr, self.password]):
+            raise ValueError("EmailAlertProvider needs EMAIL_FROM, EMAIL_TO, EMAIL_PASS in .env")
+
+    def send(self, message: str) -> bool:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        try:
+            subject_line = message.split("\n")[0][:60]
+            msg = MIMEMultipart()
+            msg["From"]    = self.from_addr
+            msg["To"]      = self.to_addr
+            msg["Subject"] = f"PivotBoss AI — {subject_line}"
+            msg.attach(MIMEText(message, "plain"))
+
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(self.from_addr, self.password)
+                server.sendmail(self.from_addr, self.to_addr, msg.as_string())
+
+            logger.info("Email alert sent to %s", self.to_addr)
+            return True
+        except Exception as e:
+            logger.error("Email alert failed: %s", e)
+            return False
+
+
+# ── TELEGRAM ──────────────────────────────────────────────────────────────────
+
+class TelegramAlertProvider(AlertProvider):
+    """
+    Send alerts via Telegram bot.
+
+    Setup:
+      1. Message @BotFather on Telegram → /newbot → copy the token
+      2. Message your new bot once (so it can send to you)
+      3. Get your chat ID: https://api.telegram.org/bot<TOKEN>/getUpdates
+      4. Add to .env:
+           TELEGRAM_TOKEN=your_bot_token
+           TELEGRAM_CHAT_ID=your_chat_id
+    """
+
+    def __init__(self):
+        self.token   = os.getenv("TELEGRAM_TOKEN",   "").strip()
+        self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        if not self.token or not self.chat_id:
+            raise ValueError("TelegramAlertProvider needs TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in .env")
+
+    def send(self, message: str) -> bool:
+        params = urllib.parse.urlencode({
+            "chat_id": self.chat_id,
+            "text":    message,
+            "parse_mode": "Markdown",
+        })
+        url = f"https://api.telegram.org/bot{self.token}/sendMessage?{params}"
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                ok = resp.status == 200
+            return ok
+        except Exception as e:
+            logger.error("Telegram alert failed: %s", e)
+            return False
+
+
+# ── MULTI-CHANNEL ─────────────────────────────────────────────────────────────
+
+class MultiAlertProvider(AlertProvider):
+    """Send to multiple channels simultaneously."""
+
+    def __init__(self, providers: list):
+        self.providers = providers
+
+    def send(self, message: str) -> bool:
+        return all(p.send(message) for p in self.providers)
+
+
 # ── FACTORY ───────────────────────────────────────────────────────────────────
 
 def get_alert_provider(channel: str = "console") -> AlertProvider:
     """
     Build an alert provider by name.
 
-      "console"  → ConsoleAlertProvider (default, always works)
-      "whatsapp" → WhatsAppCallMeBotProvider (needs WHATSAPP_* env)
+      "console"   → ConsoleAlertProvider (default, always works)
+      "whatsapp"  → WhatsAppCallMeBotProvider (needs WHATSAPP_* env)
+      "email"     → EmailAlertProvider (needs EMAIL_FROM/TO/PASS env)
+      "telegram"  → TelegramAlertProvider (needs TELEGRAM_TOKEN/CHAT_ID env)
+      "all"       → MultiAlertProvider using all configured channels
     """
     channel = (channel or "console").strip().lower()
 
@@ -116,5 +212,31 @@ def get_alert_provider(channel: str = "console") -> AlertProvider:
         except ValueError as e:
             logger.warning("Falling back to console alerts: %s", e)
             return ConsoleAlertProvider()
+
+    if channel == "email":
+        try:
+            return EmailAlertProvider()
+        except ValueError as e:
+            logger.warning("Falling back to console alerts: %s", e)
+            return ConsoleAlertProvider()
+
+    if channel == "telegram":
+        try:
+            return TelegramAlertProvider()
+        except ValueError as e:
+            logger.warning("Falling back to console alerts: %s", e)
+            return ConsoleAlertProvider()
+
+    if channel == "all":
+        providers = [ConsoleAlertProvider()]
+        for cls, name in [(WhatsAppCallMeBotProvider, "WhatsApp"),
+                          (EmailAlertProvider, "Email"),
+                          (TelegramAlertProvider, "Telegram")]:
+            try:
+                providers.append(cls())
+                logger.info("%s alerts enabled", name)
+            except ValueError:
+                pass
+        return MultiAlertProvider(providers)
 
     return ConsoleAlertProvider()
