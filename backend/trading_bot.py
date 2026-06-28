@@ -267,7 +267,7 @@ class PivotBossBot:
                 self.analysis[symbol]["quote"]  = quote
 
                 sig_val = signal.signal.value if hasattr(signal.signal, 'value') else str(signal.signal)
-                emoji = "🟢" if "BUY" in sig_val else "🔴" if "SELL" in sig_val else "⚪"
+                emoji = "[BUY]" if "BUY" in sig_val else "[SELL]" if "SELL" in sig_val else "⚪"
                 logger.info(
                     f"  {emoji} {symbol:12} | LTP: ₹{quote['ltp']:>10.2f} | "
                     f"Signal: {sig_val:12} | Strength: {signal.strength}/10"
@@ -318,7 +318,7 @@ class PivotBossBot:
         }
         trade = self.trader.open_position(trade_dict)
         if trade:
-            logger.info(f"  📋 Paper trade opened: {trade.symbol} {trade.direction} "
+            logger.info(f"  [MONITOR] Paper trade opened: {trade.symbol} {trade.direction} "
                         f"| Entry: ₹{trade.entry_price} | SL: ₹{trade.stop_loss} | Qty: {trade.quantity}")
             self._save_trader()
 
@@ -348,7 +348,7 @@ class PivotBossBot:
                 ltp = quote["ltp"]
                 closed = self.trader.update_position(trade.symbol, ltp)
                 if closed:
-                    pnl_color = "✅" if closed.pnl > 0 else "❌"
+                    pnl_color = "[OK]" if closed.pnl > 0 else "[ERROR]"
                     logger.info(
                         f"  {pnl_color} {trade.symbol} closed | {closed.status} | "
                         f"Exit: ₹{closed.exit_price} | P&L: ₹{closed.pnl:+.2f}"

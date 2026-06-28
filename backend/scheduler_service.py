@@ -174,7 +174,7 @@ class TradingScheduler:
                 "at": datetime.now(IST).isoformat(),
             }
             self.alerts.send(
-                f"✅ Morning setup complete — CPR levels calculated for "
+                f"[OK] Morning setup complete — CPR levels calculated for "
                 f"{len(self.bot.analysis)} symbols."
             )
         except Exception as e:
@@ -184,7 +184,7 @@ class TradingScheduler:
                 "error": str(e),
                 "at": datetime.now(IST).isoformat(),
             }
-            self.alerts.send(f"❌ Morning setup FAILED: {e}")
+            self.alerts.send(f"[ERROR] Morning setup FAILED: {e}")
 
     def _run_market_scan(self) -> None:
         """09:16 IST — live quotes → signals → auto paper-trade."""
@@ -195,10 +195,10 @@ class TradingScheduler:
             # Build alert message for strong signals.
             strong = [s for s in (signals or []) if getattr(s, "strength", 0) >= 7]
             msg_parts = [
-                f"📊 Market scan complete — {len(signals or [])} signals generated."
+                f"[SCAN] Market scan complete — {len(signals or [])} signals generated."
             ]
             for s in strong:
-                emoji = "🟢" if "BUY" in s.signal else "🔴"
+                emoji = "[BUY]" if "BUY" in s.signal else "[SELL]"
                 msg_parts.append(
                     f"  {emoji} {s.symbol} {s.signal} (strength {s.strength}) "
                     f"@ ₹{s.entry_price}"
@@ -218,7 +218,7 @@ class TradingScheduler:
                 "error": str(e),
                 "at": datetime.now(IST).isoformat(),
             }
-            self.alerts.send(f"❌ Market scan FAILED: {e}")
+            self.alerts.send(f"[ERROR] Market scan FAILED: {e}")
 
     def _run_monitor_tick(self) -> None:
         """
@@ -242,7 +242,7 @@ class TradingScheduler:
                 }
                 stats = self.bot.trader.get_stats()
                 self.alerts.send(
-                    f"📋 Monitor: {closed} trade(s) closed | "
+                    f"[MONITOR] Monitor: {closed} trade(s) closed | "
                     f"Capital: ₹{self.bot.trader.portfolio.current_capital:,.0f} | "
                     f"Win Rate: {stats['win_rate']}% | "
                     f"Total P&L: ₹{stats['total_pnl']:+,.0f}"
@@ -261,7 +261,7 @@ class TradingScheduler:
             pct = (cap - cap_start) / cap_start * 100 if cap_start else 0
 
             self.alerts.send(
-                f"📈 End-of-day Summary\n"
+                f"[SUMMARY] End-of-day Summary\n"
                 f"  Capital: ₹{cap:,.0f} ({pct:+.2f}%)\n"
                 f"  Total Trades: {stats['total_trades']}\n"
                 f"  Win Rate: {stats['win_rate']}%\n"
@@ -281,7 +281,7 @@ class TradingScheduler:
                 "error": str(e),
                 "at": datetime.now(IST).isoformat(),
             }
-            self.alerts.send(f"❌ Daily summary FAILED: {e}")
+            self.alerts.send(f"[ERROR] Daily summary FAILED: {e}")
 
     # ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -322,7 +322,7 @@ class TradingScheduler:
             ltp = quote["ltp"]
             closed = self.bot.trader.update_position(trade.symbol, ltp)
             if closed:
-                pnl_emoji = "✅" if closed.pnl > 0 else "❌"
+                pnl_emoji = "[OK]" if closed.pnl > 0 else "[ERROR]"
                 logger.info(
                     "[monitor] %s %s closed | %s | Exit: ₹%s | P&L: ₹%+.2f",
                     pnl_emoji, trade.symbol, closed.status,

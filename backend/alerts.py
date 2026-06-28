@@ -47,10 +47,12 @@ class ConsoleAlertProvider(AlertProvider):
 
     def send(self, message: str) -> bool:
         try:
+            # Strip non-ASCII chars for Windows cp1252 compatibility
+            safe_msg = message.encode('ascii', errors='replace').decode('ascii')
             print("\n" + "=" * 50)
-            print("🔔 ALERT")
+            print("ALERT")
             print("=" * 50)
-            print(message)
+            print(safe_msg)
             print("=" * 50 + "\n")
             return True
         except Exception as e:
@@ -159,6 +161,15 @@ class TelegramAlertProvider(AlertProvider):
     """
 
     def __init__(self):
+        # Try loading .env explicitly in case it wasn't loaded by the caller
+        try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+            env_path = Path(__file__).parent.parent / "config" / ".env"
+            if env_path.exists():
+                load_dotenv(env_path, override=False)
+        except Exception:
+            pass
         self.token   = os.getenv("TELEGRAM_TOKEN",   "").strip()
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
         if not self.token or not self.chat_id:
