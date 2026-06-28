@@ -409,6 +409,112 @@ class KotakConnector:
             logger.error(f"Historical data error for {symbol}: {e}")
             return []
 
+    def get_intraday_candles(
+        self, symbol: str, timeframe: str = "5", days_back: int = 1
+    ) -> list[dict]:
+        """
+        Fetch intraday OHLCV candles from Kotak Neo for entry confirmation.
+
+        Args:
+            symbol:    e.g. "NIFTY", "RELIANCE"
+            timeframe: candle size in minutes — "1", "5", "15", "30", "60"
+            days_back: how many trading days back to fetch (1 = today only)
+
+        Returns:
+            List of candle dicts: [{datetime, open, high, low, close, volume}, ...]
+            sorted oldest → newest.
+        """
+        if not self.is_logged_in:
+            logger.warning("get_intraday_candles: not logged in")
+            return []
+
+        try:
+            info = SYMBOL_TOKENS.get(symbol)
+            if not info:
+                logger.warning("get_intraday_candles: unknown symbol %s", symbol)
+                return []
+
+            to_date   = datetime.now().strftime("%d-%m-%Y %H:%M")
+            from_dt   = datetime.now() - timedelta(days=days_back + 1)
+            from_date = from_dt.strftime("%d-%m-%Y %H:%M")
+
+            resp = self.client.historical_candles(
+                instrument_token=info["token"],
+                exchange=info["exchange"],
+                to_date=to_date,
+                from_date=from_date,
+                timeframe=timeframe,
+            )
+
+            candles = []
+            raw = None
+            if isinstance(resp, dict):
+                raw = resp.get("data", {})
+                if isinstance(raw, dict):
+                    raw = raw.get("candles", [])
+                elif isinstance(raw, list):
+                    pass
+                else:
+                    raw = []
+            elif isinstance(resp, list):
+                raw = resp
+
+            for c in (raw or []):
+                try:
+                    candles.append({
+                        "datetime": c[0],
+                        "open":     float(c[1]),
+                        "high":     float(c[2]),
+                        "low":      float(c[3]),
+                        "close":    float(c[4]),
+                        "volume":   int(c[5]) if len(c) > 5 else 0,
+                    })
+                except (IndexError, ValueError):
+                    continue
+
+            logger.info("Fetched %d x %s-min candles for %s", len(candles), timeframe, symbol)
+            return candles
+
+        except Exception as e:
+            logger.error("Intraday candles error for %s: %s", symbol, e)
+            return []
+
+    def confirm_breakout_5min(self, symbol: str, cpr_level: float, direction: str) -> bool:
+        """
+        Check if the latest 15-min candle has closed beyond the CPR level.
+        Used to confirm entry before placing a live order.
+
+        Args:
+            symbol:    trading symbol
+            cpr_level: TC for BUY confirmation, BC for SELL confirmation
+            direction: "BUY" or "SELL"
+
+        Returns:
+            True if breakout is confirmed on a 15-min close, False otherwise.
+        """
+        candles = self.get_intraday_candles(symbol, timeframe="15", days_back=1)
+        if not candles:
+            logger.warning("confirm_breakout_5min: no candles for %s", symbol)
+            return False
+
+        latest = candles[-1]
+        close = latest["close"]
+
+        if direction == "BUY":
+            confirmed = close > cpr_level
+            logger.info(
+                "Breakout check %s BUY: close=%.2f vs TC=%.2f → %s",
+                symbol, close, cpr_level, "CONFIRMED" if confirmed else "NOT YET"
+            )
+            return confirmed
+        else:
+            confirmed = close < cpr_level
+            logger.info(
+                "Breakout check %s SELL: close=%.2f vs BC=%.2f → %s",
+                symbol, close, cpr_level, "CONFIRMED" if confirmed else "NOT YET"
+            )
+            return confirmed
+
     # ── WEBSOCKET LIVE TICKS ────────────────────────────────────────────────
 
     def on_tick(self, callback: Callable):

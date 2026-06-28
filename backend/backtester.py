@@ -159,8 +159,8 @@ class CPRBacktester:
                                  (open > TC for BUY, open < BC for SELL).
                                  This simulates waiting for a confirmed breakout.
         """
-        if exit_model not in ("pessimistic", "optimistic", "trail"):
-            raise ValueError("exit_model must be 'pessimistic', 'optimistic', or 'trail'")
+        if exit_model not in ("pessimistic", "optimistic", "trail", "partial"):
+            raise ValueError("exit_model must be 'pessimistic', 'optimistic', 'trail', or 'partial'")
         self.min_strength = min_strength
         self.exit_model = exit_model
         self.include_neutral = include_neutral
@@ -384,16 +384,35 @@ class CPRBacktester:
             # If T1 hit but T2 not hit → exit at entry (breakeven = 0 loss).
             # If T1 not hit and SL hit → loss at SL (normal stop).
             if t1_hit:
-                if t2_hit:
-                    return t2, "T2"   # rode it to T2
-                elif t3_hit:
+                if t3_hit:
                     return t3, "T3"
+                elif t2_hit:
+                    return t2, "T2"   # rode it to T2
                 else:
                     return entry, "BE"  # trailed to breakeven
             elif sl_hit:
                 return sl, "SL"
             else:
                 return 0.0, None      # EOD — flat
+
+        elif self.exit_model == "partial":
+            # Partial exit model: take 50% profit at T1, trail rest to T2.
+            # Simulated as weighted average: 0.5 * T1 + 0.5 * T2 when both hit,
+            # or T1 alone when only T1 hit, or SL when stopped out.
+            if t1_hit:
+                if t2_hit:
+                    # 50% exits at T1, 50% at T2 → avg of the two
+                    avg = (t1 + t2) / 2
+                    return round(avg, 2), "T1+T2"
+                elif t3_hit:
+                    avg = (t1 + t3) / 2
+                    return round(avg, 2), "T1+T3"
+                else:
+                    return t1, "T1"   # only 50% filled, rest trails but never hit
+            elif sl_hit:
+                return sl, "SL"
+            else:
+                return 0.0, None
 
         else:  # pessimistic — proximity rule
             # If both SL and T1 are hit, use proximity to determine which was first

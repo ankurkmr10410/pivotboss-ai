@@ -98,9 +98,42 @@ class YahooProvider(MarketDataProvider):
 
     @staticmethod
     def _default_range_fetch(ticker: str, start: date, end: date):
-        """Bulk fetch by explicit [start, end] for multi-year backtests."""
+        """Bulk fetch by explicit [start, end] for multi-year backtests.
+        Includes retry logic for Yahoo rate-limiting and alternate ticker fallbacks."""
         import yfinance as yf
-        return yf.Ticker(ticker).history(start=start.isoformat(), end=end.isoformat(), auto_adjust=False)
+        import time
+
+        # Alternate tickers to try if primary fails
+        alt_map = {
+            "^NSEBANK": ["^NSEBANK", "BANKNIFTY.NS", "^CNXBANK"],
+            "^NSEI":    ["^NSEI", "NIFTY50.NS"],
+        }
+        tickers_to_try = alt_map.get(ticker, [ticker])
+
+        last_err = None
+        for t in tickers_to_try:
+            for attempt in range(3):
+                try:
+                    df = yf.Ticker(t).history(
+                        start=start.isoformat(), end=end.isoformat(), auto_adjust=False
+                    )
+                    if df is not None and len(df) > 0:
+                        if t != ticker:
+                            logger.info("Used alternate ticker %s for %s", t, ticker)
+                        return df
+                    break  # empty but no error — try next alt ticker
+                except Exception as e:
+                    last_err = e
+                    if any(kw in str(e) for kw in ["Too Many", "Rate", "429"]):
+                        wait = (attempt + 1) * 5
+                        logger.warning("Yahoo rate-limited (%s), retry in %ds...", t, wait)
+                        time.sleep(wait)
+                    else:
+                        logger.warning("Yahoo fetch error for %s: %s", t, e)
+                        break
+
+        logger.error("Yahoo range fetch failed for %s: %s", ticker, last_err)
+        return None
 
     @staticmethod
     def _parse_history(hist, days: Optional[int] = None) -> List[Candle]:

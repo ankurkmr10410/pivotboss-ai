@@ -277,8 +277,20 @@ class PivotBossBot:
 
                 signals_generated.append(signal)
 
-                # Auto paper trade if strength ≥ 6
+                # Auto paper trade if strength >= 6
+                # Optionally confirm with 15-min breakout before entering
                 if signal.strength >= 6 and sig_val != "NEUTRAL":
+                    direction = "BUY" if "BUY" in sig_val else "SELL"
+                    cpr_gate = signal.cpr_levels.get("tc") if direction == "BUY" else signal.cpr_levels.get("bc")
+                    use_breakout_confirm = os.getenv("USE_BREAKOUT_CONFIRM", "false").lower() == "true"
+
+                    if use_breakout_confirm and cpr_gate and hasattr(self.connector, "confirm_breakout_5min"):
+                        confirmed = self.connector.confirm_breakout_5min(symbol, float(cpr_gate), direction)
+                        if not confirmed:
+                            logger.info(f"  {symbol}: 15-min breakout not confirmed yet — skipping entry")
+                            continue
+                        logger.info(f"  {symbol}: 15-min breakout CONFIRMED — entering trade")
+
                     self._auto_paper_trade(signal, quote)
 
             except Exception as e:

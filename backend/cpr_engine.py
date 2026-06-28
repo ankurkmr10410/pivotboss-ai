@@ -281,15 +281,21 @@ def generate_signal(cpr: CPRLevels, current_price: float,
     strength = min(10, max(1, strength))
 
     # --- ENTRY, SL, TARGET CALCULATION ---
+    # SL logic: use the tighter of (a) below/above BC/TC or (b) 0.5% from entry.
+    # This prevents wide SL when entry is far from BC/TC, improving R:R.
     if signal in [Signal.BUY, Signal.STRONG_BUY]:
         entry = current_price
-        stop_loss = round(cpr.bc * 0.998, 2)        # Just below BC
+        sl_from_bc  = round(cpr.bc * 0.998, 2)          # just below BC
+        sl_from_pct = round(entry * 0.995, 2)            # 0.5% below entry
+        stop_loss   = max(sl_from_bc, sl_from_pct)       # tighter of the two
         target1 = round(cpr.r1, 2)
         target2 = round(cpr.r2, 2)
         target3 = round(cpr.r3, 2)
     elif signal in [Signal.SELL, Signal.STRONG_SELL]:
         entry = current_price
-        stop_loss = round(cpr.tc * 1.002, 2)        # Just above TC
+        sl_from_tc  = round(cpr.tc * 1.002, 2)          # just above TC
+        sl_from_pct = round(entry * 1.005, 2)            # 0.5% above entry
+        stop_loss   = min(sl_from_tc, sl_from_pct)       # tighter of the two
         target1 = round(cpr.s1, 2)
         target2 = round(cpr.s2, 2)
         target3 = round(cpr.s3, 2)
