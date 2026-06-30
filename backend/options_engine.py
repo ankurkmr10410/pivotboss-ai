@@ -159,8 +159,17 @@ def select_option_contract(
     direction:   str,
     capital:     float = 500000,
     strike_type: str   = "ATM",
+    is_virgin:   bool  = False,
+    cpr_type:    str   = "NORMAL",
 ) -> OptionContract:
-    """Select the best option contract for a given CPR signal."""
+    """
+    Select the best option contract for a given CPR signal.
+
+    Conviction-based sizing:
+      - Virgin CPR (price never entered yesterday's CPR zone) -> 2x lots
+      - Narrow CPR (high trending probability) -> 1.5x lots
+      - Normal/Wide CPR -> 1x lots (base sizing)
+    """
     option_type = "CE" if direction in ("BUY", "STRONG_BUY") else "PE"
     expiry      = get_nearest_expiry(symbol)
     lot_size    = LOT_SIZE.get(symbol, 75)
@@ -177,7 +186,20 @@ def select_option_contract(
     est_premium = max(est_premium, 50)
 
     sl_loss_per_lot = est_premium * lot_size * (1 - OPTIONS_SL_MULT)
-    lots = max(1, int(risk_amount / sl_loss_per_lot)) if sl_loss_per_lot > 0 else 1
+    base_lots = max(1, int(risk_amount / sl_loss_per_lot)) if sl_loss_per_lot > 0 else 1
+
+    # Conviction multiplier — size up on higher-probability CPR setups
+    if is_virgin:
+        conviction_mult = 2.0
+        conviction_tag = "VIRGIN CPR (2x size)"
+    elif cpr_type == "NARROW":
+        conviction_mult = 1.5
+        conviction_tag = "NARROW CPR (1.5x size)"
+    else:
+        conviction_mult = 1.0
+        conviction_tag = "standard size"
+
+    lots = max(1, round(base_lots * conviction_mult))
 
     contract = OptionContract(
         symbol=symbol,
@@ -191,8 +213,8 @@ def select_option_contract(
     )
 
     logger.info(
-        "Option selected: %s | Strike: %d %s | Expiry: %s | Lots: %d",
-        symbol, strike, option_type, contract.expiry, lots
+        "Option selected: %s | Strike: %d %s | Expiry: %s | Lots: %d (%s)",
+        symbol, strike, option_type, contract.expiry, lots, conviction_tag
     )
     return contract
 

@@ -324,12 +324,17 @@ class PivotBossBot:
             capital = self.trader.current_capital
             strike_type = os.getenv("OPTIONS_STRIKE", "ATM")
 
+            is_virgin = bool(signal.cpr_levels.get("is_virgin", False))
+            cpr_type  = signal.cpr_levels.get("cpr_type", "NORMAL")
+
             contract = select_option_contract(
                 symbol=signal.symbol,
                 spot_price=spot,
                 direction="BUY" if "BUY" in sig_val else "SELL",
                 capital=capital,
                 strike_type=strike_type,
+                is_virgin=is_virgin,
+                cpr_type=cpr_type,
             )
 
             est_premium = spot * 0.01 if signal.symbol == "NIFTY" else spot * 0.005
@@ -355,8 +360,14 @@ class PivotBossBot:
 
             trade = self._options_trader.open_trade(contract, entry_premium)
 
+            conviction_tag = ""
+            if is_virgin:
+                conviction_tag = " [VIRGIN CPR - 2x SIZE]"
+            elif cpr_type == "NARROW":
+                conviction_tag = " [NARROW CPR - 1.5x SIZE]"
+
             alert_lines = [
-                "[OPTIONS PAPER TRADE]",
+                "[OPTIONS PAPER TRADE]" + conviction_tag,
                 "Symbol  : " + contract.tradingsymbol,
                 "Strike  : " + str(contract.strike) + " " + contract.option_type,
                 "Expiry  : " + contract.expiry,
