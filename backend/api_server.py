@@ -466,6 +466,58 @@ async def run_backtest(
     }
 
 
+@app.get("/api/backtest/options")
+async def run_options_backtest(
+    symbol: str = "NIFTY",
+    years: float = 2.0,
+    min_strength: int = 6,
+    strike_type: str = "ATM",
+):
+    """Run options backtest using delta-approximated ATM premium simulation."""
+    import asyncio
+    from datetime import date, timedelta
+    from providers.yahoo_provider import YahooProvider
+    from options_backtester import OptionsBacktester
+    from config_loader import Watchlist
+    from db import MarketStore as _MS
+
+    wl = Watchlist()
+    if symbol not in ("NIFTY", "BANKNIFTY"):
+        raise HTTPException(400, "Options backtest only supports NIFTY or BANKNIFTY")
+
+    end = date.today()
+    start = end - timedelta(days=int(years * 365))
+
+    _store = _MS()
+    await _store.init()
+    cached = await _store.get_candles(symbol, start=str(start), end=str(end))
+    if cached and len(cached) > 10:
+        candle_dicts = [c.to_dict() for c in cached]
+    else:
+        provider = YahooProvider.from_watchlist(wl)
+        candles = provider.get_history_range(symbol, start, end)
+        candle_dicts = [c.to_dict() for c in candles]
+
+    if len(candle_dicts) < 3:
+        raise HTTPException(503, "Not enough historical data for " + symbol)
+
+    bt = OptionsBacktester(min_strength=min_strength, strike_type=strike_type)
+    result = bt.run(symbol, candle_dicts)
+
+    return {
+        "symbol": symbol,
+        "strike_type": strike_type,
+        "start_date": str(start),
+        "end_date": str(end),
+        "years": years,
+        "min_strength": min_strength,
+        "candles": len(candle_dicts),
+        "metrics": result.metrics(),
+        "by_conviction": result.breakdown_by_conviction(),
+        "trades": [t.to_dict() for t in result.trades[-50:]],
+    }
+
+
 @app.get("/api/options/trades")
 async def get_options_trades():
     """Get all paper options trades."""
