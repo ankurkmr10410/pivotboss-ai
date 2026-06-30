@@ -294,11 +294,70 @@ class PivotBossBot:
 
                     self._auto_paper_trade(signal, quote)
 
+                    # Also paper trade options for NIFTY/BANKNIFTY if enabled
+                    if os.getenv("OPTIONS_TRADING", "false").lower() == "true":
+                        if symbol in ("NIFTY", "BANKNIFTY"):
+                            self._auto_options_trade(signal, quote)
+
             except Exception as e:
                 logger.error(f"Signal error for {symbol}: {e}")
 
         self._save_analysis()
         return signals_generated
+
+    # ── STEP 2b: AUTO OPTIONS PAPER TRADE ───────────────────────────────────
+
+    def _auto_options_trade(self, signal, quote):
+        """Open a paper options trade based on a CPR signal (NIFTY/BANKNIFTY only)."""
+        try:
+            from options_engine import select_option_contract, PaperOptionsTrader
+
+            sig_val = signal.signal.value if hasattr(signal.signal, "value") else str(signal.signal)
+            if "NEUTRAL" in sig_val:
+                return
+
+            spot = quote.get("ltp", 0)
+            if not spot:
+                logger.warning("Options trade skipped - no LTP for %s", signal.symbol)
+                return
+
+            capital = self.trader.current_capital
+            strike_type = os.getenv("OPTIONS_STRIKE", "ATM")
+
+            contract = select_option_contract(
+                symbol=signal.symbol,
+                spot_price=spot,
+                direction="BUY" if "BUY" in sig_val else "SELL",
+                capital=capital,
+                strike_type=strike_type,
+            )
+
+            est_premium = spot * 0.01 if signal.symbol == "NIFTY" else spot * 0.005
+            est_premium = round(max(est_premium, 50), 2)
+
+            if not hasattr(self, "_options_trader"):
+                self._options_trader = PaperOptionsTrader()
+
+            trade = self._options_trader.open_trade(contract, est_premium)
+
+            alert_lines = [
+                "[OPTIONS PAPER TRADE]",
+                "Symbol  : " + contract.tradingsymbol,
+                "Strike  : " + str(contract.strike) + " " + contract.option_type,
+                "Expiry  : " + contract.expiry,
+                "Lots    : " + str(contract.lots),
+                "Premium : Rs " + str(est_premium),
+                "Target  : Rs " + str(trade.target_premium) + " (2x)",
+                "SL      : Rs " + str(trade.sl_premium) + " (50% loss)",
+                "Signal  : " + sig_val + " | Strength: " + str(signal.strength) + "/10",
+            ]
+            alert_msg = "\n".join(alert_lines)
+            logger.info(alert_msg)
+            if hasattr(self, "alerts") and self.alerts:
+                self.alerts.send(alert_msg)
+
+        except Exception as e:
+            logger.error("Options trade error: %s", e)
 
     # ── STEP 3: AUTO PAPER TRADE ────────────────────────────────────────────
 

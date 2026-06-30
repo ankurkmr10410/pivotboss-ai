@@ -466,6 +466,62 @@ async def run_backtest(
     }
 
 
+@app.get("/api/options/trades")
+async def get_options_trades():
+    """Get all paper options trades."""
+    try:
+        bot = app.state.bot
+        if hasattr(bot, "_options_trader"):
+            trader = bot._options_trader
+            return {
+                "open":    [t.to_dict() for t in trader.open_trades],
+                "closed":  [t.to_dict() for t in trader.closed_trades],
+                "summary": trader.summary(),
+            }
+        return {"open": [], "closed": [], "summary": {}}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/options/chain")
+async def get_option_chain(symbol: str = "NIFTY"):
+    """Get key option strikes for today (ATM +/- 2 steps)."""
+    try:
+        from options_engine import get_nearest_expiry, get_atm_strike, build_trading_symbol, STRIKE_STEP
+
+        bot = app.state.bot
+        quote = bot.connector.get_quotes(symbol)
+        if not quote:
+            raise HTTPException(404, "No quote for " + symbol)
+
+        spot   = quote.get("ltp", 0)
+        expiry = get_nearest_expiry(symbol)
+        atm    = get_atm_strike(spot, symbol)
+        step   = STRIKE_STEP.get(symbol, 50)
+
+        strikes = []
+        for offset in [-2, -1, 0, 1, 2]:
+            s = atm + offset * step
+            strikes.append({
+                "strike": s,
+                "CE": build_trading_symbol(symbol, expiry, s, "CE"),
+                "PE": build_trading_symbol(symbol, expiry, s, "PE"),
+                "atm": offset == 0,
+            })
+
+        return {
+            "symbol": symbol,
+            "spot": spot,
+            "expiry": expiry.strftime("%d-%b-%Y"),
+            "atm_strike": atm,
+            "strikes": strikes,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.get("/backtest")
 def backtest_page():
     """Serve the backtest UI page."""
