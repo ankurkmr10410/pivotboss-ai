@@ -335,10 +335,25 @@ class PivotBossBot:
             est_premium = spot * 0.01 if signal.symbol == "NIFTY" else spot * 0.005
             est_premium = round(max(est_premium, 50), 2)
 
+            # Try to get the real live premium from Kotak; fall back to estimate
+            real_premium = None
+            if hasattr(self.connector, "get_option_premium"):
+                try:
+                    from options_engine import get_nearest_expiry
+                    expiry_date = get_nearest_expiry(signal.symbol)
+                    real_premium = self.connector.get_option_premium(
+                        signal.symbol, expiry_date, contract.strike, contract.option_type
+                    )
+                except Exception as e:
+                    logger.warning("Could not fetch real option premium: %s", e)
+
+            entry_premium = real_premium if real_premium else est_premium
+            premium_source = "LIVE" if real_premium else "ESTIMATED"
+
             if not hasattr(self, "_options_trader"):
                 self._options_trader = PaperOptionsTrader()
 
-            trade = self._options_trader.open_trade(contract, est_premium)
+            trade = self._options_trader.open_trade(contract, entry_premium)
 
             alert_lines = [
                 "[OPTIONS PAPER TRADE]",
@@ -346,7 +361,7 @@ class PivotBossBot:
                 "Strike  : " + str(contract.strike) + " " + contract.option_type,
                 "Expiry  : " + contract.expiry,
                 "Lots    : " + str(contract.lots),
-                "Premium : Rs " + str(est_premium),
+                "Premium : Rs " + str(entry_premium) + " (" + premium_source + ")",
                 "Target  : Rs " + str(trade.target_premium) + " (2x)",
                 "SL      : Rs " + str(trade.sl_premium) + " (50% loss)",
                 "Signal  : " + sig_val + " | Strength: " + str(signal.strength) + "/10",

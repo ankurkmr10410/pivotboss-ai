@@ -29,12 +29,18 @@ logger = logging.getLogger(__name__)
 # below is a fallback used only if the yaml is unavailable, so the module still
 # imports standalone.
 _FALLBACK_SYMBOL_TOKENS = {
-    "NIFTY":      {"exchange": "nse_fo", "token": "26000", "lot_size": 75},
-    "BANKNIFTY":  {"exchange": "nse_fo", "token": "26009", "lot_size": 35},
+    "NIFTY":      {"exchange": "nse_idx", "token": "26000", "lot_size": 75},
+    "BANKNIFTY":  {"exchange": "nse_idx", "token": "26009", "lot_size": 35},
     "RELIANCE":   {"exchange": "nse_cm", "token": "2885",  "lot_size": 1},
     "HDFCBANK":   {"exchange": "nse_cm", "token": "1333",  "lot_size": 1},
     "TCS":        {"exchange": "nse_cm", "token": "11536", "lot_size": 1},
     "INFY":       {"exchange": "nse_cm", "token": "1594",  "lot_size": 1},
+}
+
+# Options lot sizes (used by get_option_token when scrip master doesn't return one)
+LOT_SIZE_FALLBACK = {
+    "NIFTY":     75,
+    "BANKNIFTY": 35,
 }
 
 
@@ -515,6 +521,98 @@ class KotakConnector:
             )
             return confirmed
 
+    def get_option_token(
+        self, symbol: str, expiry, strike: int, option_type: str
+    ) -> Optional[dict]:
+        """
+        Find the exact Kotak instrument token for an option contract using search_scrip.
+
+        Args:
+            symbol:      "NIFTY" or "BANKNIFTY"
+            expiry:      date object (the option's expiry date)
+            strike:      strike price as int
+            option_type: "CE" or "PE"
+
+        Returns:
+            dict with token, trading_symbol, lot_size — or None if not found.
+        """
+        if not self.is_logged_in:
+            logger.warning("get_option_token: not logged in")
+            return None
+
+        try:
+            expiry_str = expiry.strftime("%Y%m") if hasattr(expiry, "strftime") else str(expiry)
+
+            resp = self.client.search_scrip(
+                exchange_segment="nse_fo",
+                symbol=symbol,
+                expiry=expiry_str,
+                option_type=option_type,
+                strike_price=str(strike),
+            )
+
+            if not resp or self._response_has_error(resp):
+                logger.warning("Option scrip search failed for %s %s %s: %s",
+                                symbol, strike, option_type, self._safe_response(resp))
+                return None
+
+            results = resp if isinstance(resp, list) else resp.get("data", [])
+            if not results:
+                logger.warning("No option scrip found for %s %s %s", symbol, strike, option_type)
+                return None
+
+            match = results[0]
+            return {
+                "token":         match.get("pSymbol") or match.get("token"),
+                "trading_symbol": match.get("pTrdSymbol") or match.get("tradingsymbol"),
+                "lot_size":      int(match.get("lLotSize", 0)) or LOT_SIZE_FALLBACK.get(symbol, 75),
+            }
+
+        except Exception as e:
+            logger.error("get_option_token error: %s", e)
+            return None
+
+    def get_option_premium(
+        self, symbol: str, expiry, strike: int, option_type: str
+    ) -> Optional[float]:
+        """
+        Fetch the live premium (LTP) for a specific option contract.
+        Returns None if the contract can't be found or quote fails.
+        """
+        info = self.get_option_token(symbol, expiry, strike, option_type)
+        if not info or not info.get("token"):
+            return None
+
+        try:
+            resp = self.client.quotes(
+                instrument_tokens=[{
+                    "instrument_token": info["token"],
+                    "exchange_segment": "nse_fo",
+                }],
+                quote_type="ltp",
+            )
+
+            raw = None
+            if isinstance(resp, list):
+                raw = resp
+            elif isinstance(resp, dict):
+                raw = resp.get("data", [])
+                if isinstance(raw, dict):
+                    raw = [raw]
+
+            if raw and len(raw) > 0:
+                d = raw[0] if isinstance(raw[0], dict) else {}
+                premium = d.get("last_traded_price") or d.get("ltp")
+                if premium:
+                    return round(float(premium), 2)
+
+            logger.warning("No premium data for %s", info.get("trading_symbol"))
+            return None
+
+        except Exception as e:
+            logger.error("get_option_premium error: %s", e)
+            return None
+
     # ── WEBSOCKET LIVE TICKS ────────────────────────────────────────────────
 
     def on_tick(self, callback: Callable):
@@ -755,6 +853,29 @@ class MockKotakConnector(KotakConnector):
 
     def get_positions(self) -> list:
         return []
+
+    def get_option_token(self, symbol, expiry, strike, option_type):
+        """Mock option token - returns a fake but consistent token."""
+        exp_str = expiry.strftime("%y%b%d").upper() if hasattr(expiry, "strftime") else str(expiry)
+        trading_symbol = f"{symbol}{exp_str}{strike}{option_type}"
+        return {
+            "token": f"MOCK_{trading_symbol}",
+            "trading_symbol": trading_symbol,
+            "lot_size": LOT_SIZE_FALLBACK.get(symbol, 75),
+        }
+
+    def get_option_premium(self, symbol, expiry, strike, option_type):
+        """Mock option premium - estimates based on spot and moneyness."""
+        import random
+        base = self.MOCK_PRICES.get(symbol, {})
+        spot = base.get("ltp", 24000)
+        atm_premium = spot * (0.01 if symbol == "NIFTY" else 0.005)
+        distance = abs(spot - strike)
+        # premium decays as strike moves away from spot (rough simulation)
+        decay = max(0.1, 1 - (distance / spot) * 10)
+        premium = max(atm_premium * decay, 5.0)
+        noise = random.uniform(-0.05, 0.05)
+        return round(premium * (1 + noise), 2)
 
 
 # ── FACTORY ────────────────────────────────────────────────────────────────────
