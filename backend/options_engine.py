@@ -35,8 +35,11 @@ LOT_SIZE = {
 }
 
 OPTIONS_RISK_PCT    = 0.02   # 2% of capital per trade
-OPTIONS_TARGET_MULT = 2.0    # exit when premium 2x
-OPTIONS_SL_MULT     = 0.5    # exit when premium 50% below entry
+OPTIONS_TARGET_MULT = 1.4    # exit when premium 1.4x (realistic intraday ATM move)
+OPTIONS_SL_MULT     = 0.65   # exit when premium drops 35% (0.65x entry)
+# Rationale: ATM delta ~0.5, NIFTY daily range ~150-250 pts.
+# 150pt move x 0.5 delta = 75pt premium move on ~200 entry = 37.5% gain (1.375x).
+# Tighter exits ensure TARGET and SL are hit intraday rather than always going to EOD.
 
 
 # ── DATACLASSES ────────────────────────────────────────────────────────────────

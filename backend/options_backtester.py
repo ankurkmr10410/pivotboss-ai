@@ -35,10 +35,15 @@ logger = logging.getLogger(__name__)
 ATM_DELTA = 0.5
 
 # Baseline premium as % of spot (used as starting premium estimate)
+# NIFTY ATM weekly ~0.8-1.2% of spot, BANKNIFTY ~0.4-0.7%
 BASE_PREMIUM_PCT = {
-    "NIFTY":     0.01,    # ~1% of spot
+    "NIFTY":     0.009,   # ~0.9% of spot (more realistic than 1%)
     "BANKNIFTY": 0.005,   # ~0.5% of spot
 }
+
+# 15-min intraday confirmation: entry only after first 15 min candle confirms direction.
+# Simulated by requiring open move of at least 0.1% beyond TC/BC before entry.
+CONFIRMATION_PCT = 0.001   # 0.1% beyond CPR level required for entry
 
 
 @dataclass
@@ -175,6 +180,14 @@ class OptionsBacktester:
             is_buy = "BUY" in sig_val
             option_type = "CE" if is_buy else "PE"
             direction = "LONG" if is_buy else "SHORT"
+
+            # 15-min intraday confirmation: skip trade if opening move doesn't confirm direction.
+            # BUY: open must be > TC by at least CONFIRMATION_PCT to confirm bullish breakout.
+            # SELL: open must be < BC by at least CONFIRMATION_PCT to confirm bearish breakout.
+            if is_buy and today["open"] < cpr.tc * (1 + CONFIRMATION_PCT):
+                continue   # no confirmed breakout above TC
+            if not is_buy and today["open"] > cpr.bc * (1 - CONFIRMATION_PCT):
+                continue   # no confirmed breakout below BC
 
             entry_index = today["open"]
             strike = int(round(entry_index / step) * step)
