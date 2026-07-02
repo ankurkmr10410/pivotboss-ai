@@ -181,14 +181,10 @@ class OptionsBacktester:
             option_type = "CE" if is_buy else "PE"
             direction = "LONG" if is_buy else "SHORT"
 
-            # 15-min intraday confirmation: skip trade if opening move doesn't confirm direction.
-            # BUY: open must be > TC by at least CONFIRMATION_PCT to confirm bullish breakout.
-            # SELL: open must be < BC by at least CONFIRMATION_PCT to confirm bearish breakout.
-            if is_buy and today["open"] < cpr.tc * (1 + CONFIRMATION_PCT):
-                continue   # no confirmed breakout above TC
-            if not is_buy and today["open"] > cpr.bc * (1 - CONFIRMATION_PCT):
-                continue   # no confirmed breakout below BC
-
+            # Note: 15-min intraday confirmation is applied in LIVE trading via
+            # kotak_connector.confirm_breakout_5min(). In this daily-candle backtest
+            # we use the open price as entry — the signal already requires open above
+            # TC (BUY) or below BC (SELL) via generate_signal() logic.
             entry_index = today["open"]
             strike = int(round(entry_index / step) * step)
 
